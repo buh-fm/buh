@@ -1,0 +1,214 @@
+name: deploy
+
+# Build and roll out the buh dogfooding node on a push to main:
+#   - buh-api  (the relay/blob node daemon, static musl) -> slartibartfast
+#   - buh-cli  (the operator admin tool, static musl)    -> slartibartfast
+#
+# This workflow is the source of infra truth (host, ports, paths live in `env`
+# below — there is no manifest.yml in this model; the operator-driven
+# asset/deploy.sh + asset/manifest.yml remain for the §7 model). A Gitea Actions
+# runner deploys as the dedicated `gitea_ci` user over SSH with scoped sudo
+# (asset/sudoers.d/node-host.conf + script/infra-setup.sh).
+#
+# buh is its own CA: there is NO central PKI, NO host mTLS cert to provision, and
+# NO cert.path/reload unit — the node generates its CA under /var/lib/buh/pki on
+# first start and rotates its TLS leaf in process (the per-node-CA deviation,
+# doc/design.md §5.1). So unlike the postgres-mTLS apps, this deploy ships no
+# certificate material.
+#
+# The only edge port is BUH_NODE_PORT (PQ-mTLS ingress); the loopback admin API
+# (127.0.0.1:8081) is never exposed and is what the health probe hits.
+#
+# Secrets (Gitea -> repo -> Settings -> Actions -> Secrets):
+#   RSYNC_SSH_KEY   private SSH key whose pubkey script/infra-setup.sh installed
+# (buh has no app secrets: the datastore is an embedded Turso file, the blob role
+# uses the local filesystem, and the node mints its own CA.)
+#
+# One-time per-host provisioning (gitea_ci user, authorized_keys, scoped sudoers)
+# is done by script/infra-setup.sh — run it once before this workflow can succeed.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Serialize deploys; never cancel an in-flight one (a half-applied rollout is
+# worse than a slightly stale one).
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  # --- infra truth ---
+  NODE_HOST: slartibartfast.kosherinata.internal
+  NODE_PORT: "8443"        # BUH_NODE_PORT — the only edge port (PQ-mTLS ingress)
+  ADMIN_PORT: "8081"       # loopback operator admin API (health probe target)
+  NODE_SANS: '["slartibartfast.kosherinata.internal"]'   # TOML array for the leaf SANs
+  MUSL_TARGET: x86_64-unknown-linux-musl
+  DEPLOY_KEY: |
+    ${{ secrets.RSYNC_SSH_KEY }}
+
+jobs:
+  build:
+    name: Build buh-api + buh-cli (static musl)
+    runs-on: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      # The `rust` runner image provides cargo/clippy/rustfmt, musl-gcc, and the
+      # x86_64-unknown-linux-musl std. No package installs at run time (§5).
+      #
+      # NOTE: buh links aws-lc-rs (X25519MLKEM768) — building it for musl needs
+      # cmake + a musl-targeting C compiler in the runner image. If the image
+      # lacks them, add them there (§5) rather than installing at run time; the
+      # glibc fallback (build on a runner no newer than the target, §6) is the
+      # alternative if a static musl aws-lc-rs proves impractical.
+      - name: Lint + test (deploy gate)
+        run: |
+          cargo fmt --check --all
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      - name: Build buh-api + buh-cli (static musl release, fs blob — no s3 feature)
+        run: cargo build --release --target "${MUSL_TARGET}" -p buh-api -p buh-cli
+
+      - name: Stage binaries
+        run: |
+          mkdir --parents artifacts
+          cp "target/${MUSL_TARGET}/release/buh-api" artifacts/buh-api
+          cp "target/${MUSL_TARGET}/release/buh-cli" artifacts/buh-cli
+
+      - uses: actions/upload-artifact@v3
+        with: { name: buh-binaries, path: artifacts, retention-days: 1 }
+
+  deploy-node:
+    name: Deploy buh node to slartibartfast
+    needs: build
+    runs-on: fedora-44
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v3
+        with: { name: buh-binaries, path: artifact }
+
+      - name: SSH init
+        run: |
+          mkdir -p ~/.ssh
+          echo "${DEPLOY_KEY}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
+              gitea_ci@"${NODE_HOST}" 'hostname -f'
+
+      - name: Render config.toml from infra truth
+        run: |
+          mkdir -p rendered
+          # No secrets in buh's config; render the committed template with the
+          # infra-truth values (literal substitution so an array/path can't be
+          # re-split by the shell).
+          python3 - <<'PY'
+          import os
+          node_port = os.environ["NODE_PORT"]
+          admin_port = os.environ["ADMIN_PORT"]
+          subs = {
+              "BIND": "127.0.0.1:8080",          # plain fallback; ignored when pki is enabled
+              "DB_PATH": "/var/lib/buh/relay.db",
+              "LOG_FORMAT": "json",
+              "DEFAULT_TTL_SECONDS": "604800",
+              "MAX_TTL_SECONDS": "2592000",
+              "MAX_PAYLOAD_BYTES": "262144",
+              "MAX_PULL_LIMIT": "100",
+              "MAX_WAIT_SECONDS": "30",
+              "SWEEP_INTERVAL_SECONDS": "3600",
+              "BLOB_ENABLED": "true",
+              "BLOB_BACKEND": "fs",
+              "BLOB_FS_ROOT": "/var/lib/buh/blobs",
+              "MAX_BLOB_BYTES": "67108864",
+              "S3_ENDPOINT": "",
+              "S3_REGION": "us-east-1",
+              "S3_ACCESS_KEY": "",
+              "S3_SECRET_KEY": "",
+              "PKI_ENABLED": "true",
+              "PKI_DIR": "/var/lib/buh/pki",
+              "NODE_BIND": f"0.0.0.0:{node_port}",
+              "PKI_SANS": os.environ["NODE_SANS"],
+              "LEAF_TTL_HOURS": "48",
+              "ROTATE_EVERY_HOURS": "24",
+              "ADMIN_ENABLED": "true",
+              "ADMIN_BIND": f"127.0.0.1:{admin_port}",
+          }
+          t = open("asset/config/config.toml.tmpl").read()
+          for k, v in subs.items():
+              t = t.replace("{{%s}}" % k, v)
+          open("rendered/config.toml", "w").write(t)
+          PY
+
+      - name: Provision service account + directories
+        run: |
+          # --mkpath: /etc/sysusers.d and /etc/firewalld/services don't exist by
+          # default on Fedora (only the /usr/lib variants ship).
+          rsync -az --mkpath --rsync-path='sudo rsync' \
+            asset/systemd/buh.sysusers.conf \
+            gitea_ci@"${NODE_HOST}":/etc/sysusers.d/buh.conf
+          ssh gitea_ci@"${NODE_HOST}" '
+            set -euo pipefail
+            sudo /usr/bin/systemd-sysusers
+            sudo /usr/bin/install -d -o root -g buh -m 0750 /etc/buh
+            sudo /usr/bin/install -d -o buh -g buh -m 0750 /var/lib/buh'
+
+      - name: Sync binaries, config, unit, firewalld service
+        run: |
+          rsync -az --mkpath --rsync-path='sudo rsync' --chown=root:root --chmod=0755 \
+            artifact/buh-api gitea_ci@"${NODE_HOST}":/usr/local/bin/buh-api
+          rsync -az --mkpath --rsync-path='sudo rsync' --chown=root:root --chmod=0755 \
+            artifact/buh-cli gitea_ci@"${NODE_HOST}":/usr/local/bin/buh-cli
+          rsync -az --mkpath --rsync-path='sudo rsync' --chown=root:buh --chmod=0640 \
+            rendered/config.toml gitea_ci@"${NODE_HOST}":/etc/buh/config.toml
+          rsync -az --mkpath --rsync-path='sudo rsync' --chown=root:root --chmod=0644 \
+            asset/systemd/buh-node.service \
+            gitea_ci@"${NODE_HOST}":/etc/systemd/system/buh-node.service
+          rsync -az --mkpath --rsync-path='sudo rsync' --chown=root:root --chmod=0644 \
+            asset/firewalld/buh-node.xml \
+            gitea_ci@"${NODE_HOST}":/etc/firewalld/services/buh-node.xml
+
+      - name: Apply SELinux + firewalld (idempotent)
+        run: |
+          ssh gitea_ci@"${NODE_HOST}" '
+            set -euo pipefail
+            sudo /usr/sbin/restorecon -R /usr/local/bin/buh-api /usr/local/bin/buh-cli /etc/buh /var/lib/buh
+            # Label the PQ-mTLS ingress port (guarded so re-runs are no-ops; 8443
+            # is usually already http_port_t).
+            if ! sudo /usr/sbin/semanage port -l | grep -E "^http_port_t" | grep -qw '"${NODE_PORT}"'; then
+              sudo /usr/sbin/semanage port -a -t http_port_t -p tcp '"${NODE_PORT}"'
+            fi
+            # firewalld only learns a freshly-shipped custom service after reload.
+            sudo /usr/bin/firewall-cmd --reload
+            if ! sudo /usr/bin/firewall-cmd --query-service=buh-node; then
+              sudo /usr/bin/firewall-cmd --add-service=buh-node --permanent
+              sudo /usr/bin/firewall-cmd --reload
+            fi'
+
+      - name: Restart buh-node
+        run: |
+          ssh gitea_ci@"${NODE_HOST}" '
+            set -euo pipefail
+            sudo /usr/bin/systemctl daemon-reload
+            sudo /usr/bin/systemctl enable buh-node.service
+            sudo /usr/bin/systemctl restart buh-node.service'
+
+      - name: Health probe (loopback admin API) + report CA fingerprint
+        run: |
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if info=$(ssh gitea_ci@"${NODE_HOST}" "curl -fsS http://127.0.0.1:${ADMIN_PORT}/admin/info"); then
+              echo "buh node healthy: ${info}"
+              echo "Share this node's CA fingerprint with peers to be trusted."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "buh node did not become healthy" >&2
+          exit 1
+
+      - name: Capture startup journal
+        if: always()
+        run: |
+          sleep 3
+          ssh gitea_ci@"${NODE_HOST}" 'journalctl --unit buh-node.service --no-pager -n 200'

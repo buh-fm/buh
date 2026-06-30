@@ -1,8 +1,8 @@
 # buh-api / buh-cli configuration template.
 #
-# deploy.sh renders this with values from manifest.yml, writing the result to
-# /etc/buh/config.toml on the target. {{PLACEHOLDERS}} are substituted at deploy time. Env vars
-# (BUH_*, nested with __, e.g. BUH_PKI__NODE_BIND) override any value here.
+# deploy.sh (or the Gitea Actions deploy workflow) renders this with the deployment's values,
+# writing the result to /etc/buh/config.toml on the target. Bracketed placeholders are substituted
+# at deploy time. Env vars (BUH_*, nested with __, e.g. BUH_PKI__NODE_BIND) override any value here.
 #
 # There are no secrets in this file: the node holds no DB password (the datastore is an embedded
 # Turso file) and generates its own CA/PKI on first start. The blob role, when using the `fs`

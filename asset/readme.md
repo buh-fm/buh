@@ -1,6 +1,15 @@
 # buh deployment assets
 
-Ops files for running a buh node on a real host. **Not CI-tested** — kept minimal and honest.
+Ops files for running a buh node on a real host. Two delivery models share this `asset/` layout
+(`architecture/deployment-gitea-actions.md`):
+
+- **CI-driven (the operator's own infra).** `.gitea/workflows/deploy.yml` builds static-musl
+  `buh-api`/`buh-cli` and rolls the node out to its host on push to `main`, as the `gitea_ci` user
+  over SSH with scoped sudo (`asset/sudoers.d/node-host.conf`). One-time host provisioning is
+  `script/infra-setup.sh`. The workflow `env:` is the source of infra truth — no `manifest.yml`.
+- **Operator-driven (any host).** `deploy.sh` + `manifest.yml` below, run from a workstation.
+
+Both reuse the same systemd/firewalld/config assets. **Not CI-tested** — kept minimal and honest.
 A buh node runs on an untrusted, third-party machine, so these assets assume **no central control
 plane, no shared database, and no central PKI**:
 
