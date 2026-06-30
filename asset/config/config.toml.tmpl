@@ -43,3 +43,10 @@ node_bind = "{{NODE_BIND}}"
 sans = {{PKI_SANS}}               # TOML array, e.g. ["node1.example.com"]
 leaf_ttl_hours = {{LEAF_TTL_HOURS}}
 rotate_every_hours = {{ROTATE_EVERY_HOURS}}
+
+[admin]
+# Loopback operator admin API for peer-trust management on a running node (Turso locks the DB
+# exclusively, so buh-cli reaches it here instead of opening the file). NO AUTH — keep it on
+# loopback; the daemon refuses a non-loopback bind, and it is never opened in firewalld.
+enabled = {{ADMIN_ENABLED}}
+bind = "{{ADMIN_BIND}}"

@@ -37,6 +37,9 @@ environments:
             sans: [node1.example.com]    # hostnames/IPs the leaf answers to
             leaf_ttl_hours: 48
             rotate_every_hours: 24       # in-process leaf rotation (no step-ca, no .path units)
+          admin:
+            enabled: true
+            bind: 127.0.0.1:8081         # loopback operator admin API — no auth, never at the edge
   dev:
     components:
       node:

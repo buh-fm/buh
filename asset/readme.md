@@ -32,13 +32,14 @@ sudo PKI_SANS='["node1.example.com"]' ./asset/deploy.sh
 
 ## Trust between nodes
 
-Each node pins peers by CA fingerprint — there is no shared root.
+Each node pins peers by CA fingerprint — there is no shared root. `peer` commands talk to the
+running node's **loopback admin API** (`[admin].bind`, default `127.0.0.1:8081`), so they work
+while the daemon holds the datastore and trust changes take effect on the next handshake without a
+restart. (Turso locks the DB exclusively; the admin API is how the CLI reaches it. With the daemon
+stopped, the commands fall back to opening the DB directly.)
 
-> **Note (PoC limitation):** Turso locks the datastore exclusively, so these CLI commands cannot
-> run while this host's `buh-api` daemon is up. Stop the service to change trust
-> (`systemctl stop buh-node` → edit trust → `systemctl start buh-node`), or run them from an
-> operator workstation against a copy. A daemon-side admin path that removes this constraint is
-> the next planned step.
+The admin API has **no auth** and must stay on loopback — the daemon refuses a non-loopback
+`admin.bind`. Do not open it in firewalld.
 
 ```sh
 buh-cli ca show                       # print my fingerprint to hand to a peer

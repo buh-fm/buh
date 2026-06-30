@@ -55,6 +55,9 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${LEAF_TTL_HOURS:=48}"
 : "${ROTATE_EVERY_HOURS:=24}"
 
+: "${ADMIN_ENABLED:=true}"
+: "${ADMIN_BIND:=127.0.0.1:8081}"   # loopback only — no auth
+
 echo "==> Installing service account"
 install -m 0644 "${here}/systemd/buh.sysusers.conf" /usr/lib/sysusers.d/buh.conf
 systemd-sysusers
@@ -90,6 +93,8 @@ render() {
     -e "s|{{PKI_SANS}}|${PKI_SANS}|g" \
     -e "s|{{LEAF_TTL_HOURS}}|${LEAF_TTL_HOURS}|g" \
     -e "s|{{ROTATE_EVERY_HOURS}}|${ROTATE_EVERY_HOURS}|g" \
+    -e "s|{{ADMIN_ENABLED}}|${ADMIN_ENABLED}|g" \
+    -e "s|{{ADMIN_BIND}}|${ADMIN_BIND}|g" \
     "${here}/config/config.toml.tmpl" > "${out}"
 }
 render "${CONFIG_DIR}/config.toml"
