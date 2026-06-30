@@ -18,3 +18,14 @@ wasm = []
 
 [dependencies]
 thiserror = { workspace = true }
+# ML-DSA-65 identity signing. `getrandom` enables hedged (randomized) signing — the FIPS 204
+# default — via the system RNG, and also pulls the rand_core glue.
+ml-dsa = { workspace = true, features = ["getrandom"] }
+chacha20poly1305 = { workspace = true }
+# OS randomness for AEAD nonces / ephemeral material. On wasm the `wasm_js` backend is
+# selected by a target cfg (see web/ wiring); native uses the OS RNG.
+getrandom = { workspace = true }
+sha2 = { workspace = true }
+
+[dev-dependencies]
+hex = { workspace = true }

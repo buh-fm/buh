@@ -11,7 +11,12 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod aead;
+pub mod error;
+pub mod identity;
 pub mod wire;
+
+pub use error::CryptoError;
 
 /// Crate version string, exposed so the web bundle can assert it loaded the expected build.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
