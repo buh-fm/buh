@@ -24,6 +24,7 @@ environments:
             max_payload_bytes: 262144    # 256 KiB
             max_pull_limit: 100
             max_wait_seconds: 30
+            sweep_interval_seconds: 3600   # in-process TTL sweep (no external timer)
           blob:
             enabled: true
             backend: fs                  # filesystem/ZFS; opaque client-encrypted ciphertext only

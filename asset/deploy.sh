@@ -3,7 +3,7 @@
 # Deploy one buh node on the local host (run as root on the target).
 #
 # buh has no central control plane, so this installs a single self-contained node: the binaries,
-# a hardened systemd service, the TTL-sweep timer, the firewalld opening for BUH_NODE_PORT, and a
+# a hardened systemd service, the firewalld opening for BUH_NODE_PORT, and a
 # rendered /etc/buh/config.toml. It then has the node generate its own CA and prints the
 # fingerprint to share with peers. There is deliberately NO step-ca, NO central database
 # bootstrap, and NO secret material to provision.
@@ -37,6 +37,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 : "${MAX_PAYLOAD_BYTES:=262144}"
 : "${MAX_PULL_LIMIT:=100}"
 : "${MAX_WAIT_SECONDS:=30}"
+: "${SWEEP_INTERVAL_SECONDS:=3600}"
 
 : "${BLOB_ENABLED:=true}"
 : "${BLOB_BACKEND:=fs}"
@@ -74,6 +75,7 @@ render() {
     -e "s|{{MAX_PAYLOAD_BYTES}}|${MAX_PAYLOAD_BYTES}|g" \
     -e "s|{{MAX_PULL_LIMIT}}|${MAX_PULL_LIMIT}|g" \
     -e "s|{{MAX_WAIT_SECONDS}}|${MAX_WAIT_SECONDS}|g" \
+    -e "s|{{SWEEP_INTERVAL_SECONDS}}|${SWEEP_INTERVAL_SECONDS}|g" \
     -e "s|{{BLOB_ENABLED}}|${BLOB_ENABLED}|g" \
     -e "s|{{BLOB_BACKEND}}|${BLOB_BACKEND}|g" \
     -e "s|{{BLOB_FS_ROOT}}|${BLOB_FS_ROOT}|g" \
@@ -94,10 +96,8 @@ render "${CONFIG_DIR}/config.toml"
 chmod 0640 "${CONFIG_DIR}/config.toml"
 chgrp buh "${CONFIG_DIR}/config.toml"
 
-echo "==> Installing systemd units"
+echo "==> Installing systemd unit"
 install -m 0644 "${here}/systemd/buh-node.service" /etc/systemd/system/buh-node.service
-install -m 0644 "${here}/systemd/buh-node-sweep.service" /etc/systemd/system/buh-node-sweep.service
-install -m 0644 "${here}/systemd/buh-node-sweep.timer" /etc/systemd/system/buh-node-sweep.timer
 systemctl daemon-reload
 
 if [[ "${PKI_ENABLED}" == "true" ]]; then
@@ -111,9 +111,8 @@ if [[ "${PKI_ENABLED}" == "true" ]]; then
   runuser -u buh -- "${BIN_DIR}/buh-cli" --db-path "${DB_PATH}" --pki-dir "${PKI_DIR}" ca init
 fi
 
-echo "==> Enabling services"
+echo "==> Enabling the node service"
 systemctl enable --now buh-node.service
-systemctl enable --now buh-node-sweep.timer
 
 echo
 echo "buh node deployed."

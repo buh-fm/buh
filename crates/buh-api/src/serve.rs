@@ -15,9 +15,30 @@ use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
 use tokio_rustls::TlsAcceptor;
 
-use buh_core::PeerTrustRegistry;
+use buh_core::{Ctx, PeerTrustRegistry, mailbox};
 
 use crate::tls::{NodeTls, TrustStore};
+
+/// Spawn the in-process TTL sweep that deletes expired envelopes every `interval`.
+///
+/// The sweep runs inside the daemon — not as an external `buh-cli sweep` — because Turso locks the
+/// datastore exclusively, so a second process cannot open the DB while the daemon holds it.
+pub fn spawn_sweeper(ctx: Ctx, interval: Duration) {
+    let interval = interval.max(Duration::from_secs(1));
+    tracing::info!(interval_secs = interval.as_secs(), "TTL sweeper started");
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(interval);
+        tick.tick().await; // consume the immediate first tick
+        loop {
+            tick.tick().await;
+            match mailbox::sweep(&ctx).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(removed = n, "swept expired envelopes"),
+                Err(e) => tracing::error!(error = %e, "TTL sweep failed"),
+            }
+        }
+    });
+}
 
 /// Plain-HTTP ingress: the dev/web-demo loopback mode. No certificates.
 pub async fn serve_plain(

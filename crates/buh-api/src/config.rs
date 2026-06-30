@@ -82,6 +82,10 @@ pub struct RelayConfig {
     pub max_pull_limit: i64,
     /// Maximum long-poll wait a client may request, in seconds.
     pub max_wait_seconds: u64,
+    /// How often the daemon sweeps expired envelopes, in seconds. The sweep runs **in process**
+    /// because Turso locks the datastore exclusively — a separate `buh-cli sweep` cannot run while
+    /// the daemon holds the DB.
+    pub sweep_interval_seconds: u64,
 }
 
 impl Default for AppConfig {
@@ -97,6 +101,7 @@ impl Default for AppConfig {
                 max_payload_bytes: core.max_payload_bytes,
                 max_pull_limit: core.max_pull_limit,
                 max_wait_seconds: 30,
+                sweep_interval_seconds: 3600,
             },
             blob: BlobConfig {
                 enabled: false,

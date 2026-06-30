@@ -10,8 +10,9 @@ plane, no shared database, and no central PKI**:
   is an embedded Turso file and the node generates its own CA.
 - `systemd/buh-node.service` — hardened unit (`generic.md` §8). **No `*.path` cert-reload unit**:
   the node is its own CA and rotates its TLS leaf *in process* — that is the decentralised-CA
-  deviation. Nothing external watches or reloads a certificate.
-- `systemd/buh-node-sweep.{service,timer}` — periodic TTL sweep of expired envelopes.
+  deviation. Nothing external watches or reloads a certificate. The TTL sweep also runs *in
+  process* (`[relay].sweep_interval_seconds`), because Turso locks the datastore exclusively — a
+  separate `buh-cli sweep` cannot open the DB while the daemon holds it.
 - `systemd/buh.sysusers.conf` — the unprivileged `buh` service account.
 - `firewalld/buh-node.xml` — opens **`BUH_NODE_PORT` (8443)**, the single PQ-mTLS ingress port.
   The plain loopback health port is never exposed.
@@ -32,6 +33,12 @@ sudo PKI_SANS='["node1.example.com"]' ./asset/deploy.sh
 ## Trust between nodes
 
 Each node pins peers by CA fingerprint — there is no shared root.
+
+> **Note (PoC limitation):** Turso locks the datastore exclusively, so these CLI commands cannot
+> run while this host's `buh-api` daemon is up. Stop the service to change trust
+> (`systemctl stop buh-node` → edit trust → `systemctl start buh-node`), or run them from an
+> operator workstation against a copy. A daemon-side admin path that removes this constraint is
+> the next planned step.
 
 ```sh
 buh-cli ca show                       # print my fingerprint to hand to a peer

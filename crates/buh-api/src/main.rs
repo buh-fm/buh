@@ -15,7 +15,7 @@ use tracing_subscriber::EnvFilter;
 
 use buh_api::config::{AppConfig, BlobConfig};
 use buh_api::router::router;
-use buh_api::serve::{serve_plain, serve_pqmtls};
+use buh_api::serve::{serve_plain, serve_pqmtls, spawn_sweeper};
 use buh_api::state::AppState;
 use buh_api::tls::{NodeTls, TrustStore};
 use buh_data::DataStack;
@@ -56,6 +56,12 @@ async fn main() -> anyhow::Result<()> {
             Duration::from_secs(config.pki.leaf_ttl_hours * 3600),
         )?;
     }
+
+    // In-process TTL sweep (an external `buh-cli sweep` cannot run while the daemon holds the DB).
+    spawn_sweeper(
+        stack.ctx.clone(),
+        Duration::from_secs(config.relay.sweep_interval_seconds),
+    );
 
     let state = AppState {
         ctx: stack.ctx.clone(),
