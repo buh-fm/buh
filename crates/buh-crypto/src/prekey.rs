@@ -7,14 +7,26 @@
 
 use crate::error::CryptoError;
 use crate::identity::{IdentityKeyPair, IdentityPublicKey, IdentitySignature};
-use crate::kem::{MlKemPublicKey, MlKemSecretKey, X25519PublicKey, X25519SecretKey};
+use crate::kem::{
+    MLKEM_SECRET_LEN, MlKemPublicKey, MlKemSecretKey, X25519PublicKey, X25519SecretKey,
+};
 use crate::wire::{
-    Frame, TAG_CONTEXT, TAG_IDENTITY_PUB, TAG_MLKEM_EK, TAG_ONETIME_PREKEY, TAG_PREKEY_X25519,
-    TAG_SIGNATURE,
+    Frame, Reader, TAG_CONTEXT, TAG_IDENTITY_PUB, TAG_MLKEM_EK, TAG_ONETIME_PREKEY,
+    TAG_PREKEY_X25519, TAG_SIGNATURE,
 };
 
 /// Domain-separation label bound into every prekey signature.
 const PREKEY_CONTEXT: &[u8] = b"buh-prekey-bundle-v1";
+
+/// Version byte prefixing a serialised [`PrekeySecrets`] blob.
+const SECRETS_VERSION: u8 = 1;
+
+/// Read exactly 32 bytes from `r` into an array.
+fn read_32(r: &mut Reader) -> Result<[u8; 32], CryptoError> {
+    Ok(r.read_bytes(32)?
+        .try_into()
+        .expect("read_bytes returns exactly 32"))
+}
 
 /// The secret half of a published [`PrekeyBundle`], held by the bundle's owner so they can
 /// complete the handshake as the responder. Never leaves the device.
@@ -25,6 +37,46 @@ pub struct PrekeySecrets {
     pub kem_secret: MlKemSecretKey,
     /// Secret for the one-time prekey, if one was published.
     pub one_time_prekey: Option<X25519SecretKey>,
+}
+
+impl PrekeySecrets {
+    /// Serialise the secret halves to a versioned blob for the device key store. Contains
+    /// private keys — store sealed.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(1 + 32 + MLKEM_SECRET_LEN + 1 + 32);
+        out.push(SECRETS_VERSION);
+        out.extend_from_slice(&self.signed_prekey.to_bytes());
+        out.extend_from_slice(&self.kem_secret.to_bytes());
+        match &self.one_time_prekey {
+            Some(opk) => {
+                out.push(1);
+                out.extend_from_slice(&opk.to_bytes());
+            }
+            None => out.push(0),
+        }
+        out
+    }
+
+    /// Parse a blob produced by [`Self::to_bytes`].
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
+        let mut r = Reader::new(bytes);
+        if r.read_u8()? != SECRETS_VERSION {
+            return Err(CryptoError::malformed("prekey secrets version"));
+        }
+        let signed_prekey = X25519SecretKey::from_bytes(read_32(&mut r)?);
+        let kem_secret = MlKemSecretKey::from_bytes(r.read_bytes(MLKEM_SECRET_LEN)?)?;
+        let one_time_prekey = match r.read_u8()? {
+            0 => None,
+            1 => Some(X25519SecretKey::from_bytes(read_32(&mut r)?)),
+            _ => return Err(CryptoError::malformed("prekey secrets opk flag")),
+        };
+        Ok(Self {
+            signed_prekey,
+            kem_secret,
+            one_time_prekey,
+        })
+    }
 }
 
 /// A published, signed prekey bundle. Public; safe to hand out (it *is* the invite payload).
@@ -155,6 +207,20 @@ mod tests {
             assert_eq!(parsed.signed_prekey, bundle.signed_prekey);
             assert_eq!(parsed.one_time_prekey.is_some(), with_opk);
         }
+    }
+
+    #[test]
+    fn secrets_roundtrip() {
+        let id = IdentityKeyPair::generate();
+        let (secrets, bundle) = PrekeyBundle::generate(&id, true);
+        let parsed = PrekeySecrets::from_bytes(&secrets.to_bytes()).unwrap();
+        // Public halves match the published bundle…
+        assert_eq!(parsed.signed_prekey.public_key(), bundle.signed_prekey);
+        assert!(parsed.one_time_prekey.is_some());
+        // …and the restored KEM secret still decapsulates to the bundle's encapsulation key.
+        let (ct, ss) = bundle.kem_key.encapsulate();
+        assert_eq!(parsed.kem_secret.decapsulate(&ct).unwrap(), ss);
+        assert!(PrekeySecrets::from_bytes(b"\x02bad").is_err());
     }
 
     #[test]

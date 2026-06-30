@@ -22,13 +22,29 @@ use header::read_u32;
 use crate::aead;
 use crate::error::CryptoError;
 use crate::kem::{X25519PublicKey, X25519SecretKey};
-use crate::wire::{Frame, TAG_CIPHERTEXT, TAG_RATCHET_DH, TAG_RATCHET_N, TAG_RATCHET_PN};
+use crate::wire::{
+    Frame, Reader, TAG_CIPHERTEXT, TAG_RATCHET_DH, TAG_RATCHET_N, TAG_RATCHET_PN, write_varint,
+};
 
 /// Maximum messages that may be skipped within a single receiving chain before a gap is
 /// treated as abuse rather than ordinary loss/reordering.
 pub const MAX_SKIP: u32 = 1000;
 /// Hard cap on retained skipped message keys across all chains (bounds memory under attack).
 const MAX_STORED_SKIPPED: usize = 2000;
+/// Version byte prefixing a serialised [`RatchetState`] blob.
+const STATE_VERSION: u8 = 1;
+
+/// Read exactly 32 bytes from `r` into an array.
+fn read_32(r: &mut Reader) -> Result<[u8; 32], CryptoError> {
+    Ok(r.read_bytes(32)?
+        .try_into()
+        .expect("read_bytes returns exactly 32"))
+}
+
+/// Read a big-endian `u32` from a reader.
+fn read_u32_from(r: &mut Reader) -> Result<u32, CryptoError> {
+    read_u32(r.read_bytes(4)?)
+}
 
 /// One end of a Double Ratchet session. Holds secret chain state; not `Clone`.
 pub struct RatchetState {
@@ -85,6 +101,106 @@ impl RatchetState {
             pn: 0,
             skipped: HashMap::new(),
         }
+    }
+
+    /// Serialise the entire session — keys, chains, counters, and banked skipped keys — to a
+    /// versioned blob for the device key store. **Contains all session secrets; store sealed.**
+    /// The public ratchet key is recomputed on load, not stored.
+    #[must_use]
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.push(STATE_VERSION);
+        out.extend_from_slice(&self.dhs.to_bytes());
+        let mut flags = 0u8;
+        if self.dhr.is_some() {
+            flags |= 0b001;
+        }
+        if self.cks.is_some() {
+            flags |= 0b010;
+        }
+        if self.ckr.is_some() {
+            flags |= 0b100;
+        }
+        out.push(flags);
+        if let Some(dhr) = &self.dhr {
+            out.extend_from_slice(&dhr.to_bytes());
+        }
+        out.extend_from_slice(&self.rk);
+        if let Some(cks) = &self.cks {
+            out.extend_from_slice(cks);
+        }
+        if let Some(ckr) = &self.ckr {
+            out.extend_from_slice(ckr);
+        }
+        out.extend_from_slice(&self.ns.to_be_bytes());
+        out.extend_from_slice(&self.nr.to_be_bytes());
+        out.extend_from_slice(&self.pn.to_be_bytes());
+
+        write_varint(&mut out, self.skipped.len() as u64);
+        // Sort for a deterministic encoding (HashMap order is not stable).
+        let mut entries: Vec<_> = self.skipped.iter().collect();
+        entries.sort_unstable_by_key(|((dh, n), _)| (*dh, *n));
+        for ((dh, n), mk) in entries {
+            out.extend_from_slice(dh);
+            out.extend_from_slice(&n.to_be_bytes());
+            out.extend_from_slice(mk);
+        }
+        out
+    }
+
+    /// Restore a session from a blob produced by [`Self::to_bytes`].
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
+        let mut r = Reader::new(bytes);
+        if r.read_u8()? != STATE_VERSION {
+            return Err(CryptoError::malformed("ratchet state version"));
+        }
+        let dhs = X25519SecretKey::from_bytes(read_32(&mut r)?);
+        let dhs_pub = dhs.public_key();
+        let flags = r.read_u8()?;
+        let dhr = if flags & 0b001 != 0 {
+            Some(X25519PublicKey::from_slice(&read_32(&mut r)?)?)
+        } else {
+            None
+        };
+        let rk = read_32(&mut r)?;
+        let cks = if flags & 0b010 != 0 {
+            Some(read_32(&mut r)?)
+        } else {
+            None
+        };
+        let ckr = if flags & 0b100 != 0 {
+            Some(read_32(&mut r)?)
+        } else {
+            None
+        };
+        let ns = read_u32_from(&mut r)?;
+        let nr = read_u32_from(&mut r)?;
+        let pn = read_u32_from(&mut r)?;
+
+        let count = r.read_varint()?;
+        if count > MAX_STORED_SKIPPED as u64 {
+            return Err(CryptoError::malformed("ratchet skipped-key count"));
+        }
+        let mut skipped = HashMap::new();
+        for _ in 0..count {
+            let dh = read_32(&mut r)?;
+            let n = read_u32_from(&mut r)?;
+            let mk = read_32(&mut r)?;
+            skipped.insert((dh, n), mk);
+        }
+
+        Ok(Self {
+            dhs,
+            dhs_pub,
+            dhr,
+            rk,
+            cks,
+            ckr,
+            ns,
+            nr,
+            pn,
+            skipped,
+        })
     }
 
     /// Encrypt `plaintext`, advancing the sending chain. Returns a self-describing wire
@@ -272,6 +388,33 @@ mod tests {
         let last = m.len() - 1;
         m[last] ^= 0x01;
         assert_eq!(bob.decrypt(&m), Err(CryptoError::Aead));
+    }
+
+    #[test]
+    fn state_survives_serialization_mid_conversation() {
+        let (mut alice, mut bob) = session();
+        // Get a few turns in (so chains, counters, and a DH step are all non-trivial)…
+        let m1 = alice.encrypt(b"one").unwrap();
+        assert_eq!(bob.decrypt(&m1).unwrap(), b"one");
+        let r1 = bob.encrypt(b"two").unwrap();
+        assert_eq!(alice.decrypt(&r1).unwrap(), b"two");
+        // …and bank a skipped key on Bob's side (m2 sent, m3 delivered first).
+        let _m2 = alice.encrypt(b"skipped").unwrap();
+        let m3 = alice.encrypt(b"three").unwrap();
+        assert_eq!(bob.decrypt(&m3).unwrap(), b"three");
+
+        // Round-trip both ends through the persistence blob.
+        let mut alice = RatchetState::from_bytes(&alice.to_bytes()).unwrap();
+        let mut bob = RatchetState::from_bytes(&bob.to_bytes()).unwrap();
+
+        // Conversation continues seamlessly, and the banked skipped key still opens m2.
+        assert_eq!(bob.decrypt(&_m2).unwrap(), b"skipped");
+        let m4 = alice.encrypt(b"four").unwrap();
+        assert_eq!(bob.decrypt(&m4).unwrap(), b"four");
+        let r2 = bob.encrypt(b"five").unwrap();
+        assert_eq!(alice.decrypt(&r2).unwrap(), b"five");
+
+        assert!(RatchetState::from_bytes(b"\x02bad").is_err());
     }
 
     #[test]

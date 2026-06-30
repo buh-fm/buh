@@ -6,10 +6,9 @@
 //! Two independent primitives live here; combining them into a root key is `pqxdh`'s job.
 //! Randomness comes from the system RNG (getrandom; `wasm_js` in the browser).
 
-use ml_kem::Kem;
-use ml_kem::kem::{Decapsulate, Encapsulate, KeyExport};
+use ml_kem::kem::{Decapsulate, Encapsulate, KeyExport, KeyInit};
 use ml_kem::ml_kem_768::{Ciphertext, DecapsulationKey, EncapsulationKey};
-use ml_kem::{Key, MlKem768};
+use ml_kem::{Kem, Key, MlKem768, Seed};
 use x25519_dalek::{PublicKey as XPublic, StaticSecret as XSecret};
 
 /// Copy a 32-byte shared-secret array out of an `ml-kem` `Array`.
@@ -29,6 +28,9 @@ pub const SHARED_SECRET_LEN: usize = 32;
 pub const MLKEM_ENCAPS_KEY_LEN: usize = 1184;
 /// Length of an ML-KEM-768 ciphertext (bytes).
 pub const MLKEM_CIPHERTEXT_LEN: usize = 1088;
+/// Length of the serialised ML-KEM-768 secret key — the 64-byte (d‖z) keygen seed, from which
+/// the decapsulation key is regenerated deterministically.
+pub const MLKEM_SECRET_LEN: usize = 64;
 
 // ---------- X25519 ----------
 
@@ -116,6 +118,22 @@ impl MlKemSecretKey {
             .map_err(|_| CryptoError::malformed("ml-kem ciphertext"))?;
         Ok(shared32(&self.0.decapsulate(&ct)))
     }
+
+    /// Serialise to the 64-byte keygen seed. Guard like a private key.
+    #[must_use]
+    pub fn to_bytes(&self) -> [u8; MLKEM_SECRET_LEN] {
+        let seed = self.0.to_bytes();
+        let mut out = [0u8; MLKEM_SECRET_LEN];
+        out.copy_from_slice(&seed);
+        out
+    }
+
+    /// Regenerate from the 64-byte keygen seed.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, CryptoError> {
+        let seed =
+            Seed::try_from(bytes).map_err(|_| CryptoError::malformed("ml-kem secret key"))?;
+        Ok(Self(DecapsulationKey::new(&seed)))
+    }
 }
 
 impl MlKemPublicKey {
@@ -186,6 +204,18 @@ mod tests {
         let (ct, ss) = ek2.encapsulate();
         assert_eq!(_dk.decapsulate(&ct).unwrap(), ss);
         assert!(MlKemPublicKey::from_slice(&bytes[..10]).is_err());
+    }
+
+    #[test]
+    fn mlkem_secret_key_roundtrips() {
+        let (dk, ek) = MlKemSecretKey::generate();
+        let bytes = dk.to_bytes();
+        assert_eq!(bytes.len(), MLKEM_SECRET_LEN);
+        let dk2 = MlKemSecretKey::from_bytes(&bytes).unwrap();
+        // The regenerated secret decapsulates ciphertexts to the same shared secret.
+        let (ct, ss) = ek.encapsulate();
+        assert_eq!(dk2.decapsulate(&ct).unwrap(), ss);
+        assert!(MlKemSecretKey::from_bytes(&bytes[..10]).is_err());
     }
 
     #[test]
