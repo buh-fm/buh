@@ -30,6 +30,11 @@ name: deploy
 on:
   push:
     branches: [main]
+    # Doc/readme-only commits don't change what runs on the node — skip the
+    # rebuild+rollout for them. Force a deploy any time via workflow_dispatch.
+    paths-ignore:
+      - 'doc/**'
+      - '**.md'
   workflow_dispatch:
 
 # Serialize deploys; never cancel an in-flight one (a half-applied rollout is
