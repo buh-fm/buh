@@ -139,6 +139,43 @@ the other yet (or the fingerprints don't match what was exchanged).
   label needed), so no host re-provisioning is required. Re-point edge forwarding
   to the new port.
 
+## End-to-end message check
+
+A node's reason to exist is the client messaging path: a sender seals a message,
+pushes it to the recipient's queue, the recipient pulls and opens it. `buh-e2e`
+(`crates/buh-e2e`) drives that path against a *live* node and verifies the round-trip.
+
+> **Single-node, not federated (yet).** A message pushed to a queue on node A is
+> retrievable only from node A — buh does **not** forward envelopes between nodes.
+> Peering / `peer trust` exists for mutual PQ-mTLS auth (today its only consumer is
+> `peer ping`); generic node-to-node forwarding is deferred to the mailbox-redundancy
+> work (`doc/design.md` §10). So a conversation runs entirely against **one** node,
+> and the harness targets a single node accordingly.
+
+The `:31415` port is mutual-TLS with no anonymous path, so the harness client must
+present a leaf whose CA the node trusts:
+
+```sh
+# 1. mint a throwaway client CA; print its fingerprint
+fp=$(cargo run -q -p buh-e2e -- mint --out /tmp/e2e-ca)
+
+# 2. trust it on the target node (on the node host, or via its loopback admin API)
+buh-cli peer trust "$fp" --note buh-e2e
+
+# 3. run the sealed round-trip against the live node, then clean up
+cargo run -q -p buh-e2e -- send \
+    --client-ca /tmp/e2e-ca \
+    --node testnet.buh.fm:31415 \
+    --node-ca-fp <node-ca-fingerprint>
+buh-cli peer distrust "$fp"
+```
+
+`send` generates two identities, runs PQXDH + double-ratchet to seal a message,
+`POST`s the first flight to a random queue over PQ-mTLS, pulls it back, opens it,
+asserts the plaintext matches, then acks and confirms the queue drains. A green run
+exercises the whole stack on real infra: X25519MLKEM768 mutual TLS + the
+post-quantum ratchet + the relay's enqueue/pull/ack semantics.
+
 ## Reference
 
 - CA fingerprint = lowercase hex SHA-256 of the CA cert DER (`buh-cli ca show`).
