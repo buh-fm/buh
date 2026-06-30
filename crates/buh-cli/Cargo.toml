@@ -1,0 +1,21 @@
+[package]
+name = "buh-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "buh operator/admin CLI."
+
+[[bin]]
+name = "buh-cli"
+path = "src/main.rs"
+
+[dependencies]
+buh-core.workspace = true
+buh-data.workspace = true
+tokio.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

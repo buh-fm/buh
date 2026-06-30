@@ -1,0 +1,17 @@
+[package]
+name = "buh-data"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "buh data-access adapters (Turso datastore) implementing the buh-core ports."
+
+[dependencies]
+buh-entities.workspace = true
+buh-core.workspace = true
+turso.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+tokio.workspace = true
+tracing.workspace = true

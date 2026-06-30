@@ -1,0 +1,35 @@
+[package]
+name = "buh-api"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "buh node daemon: blind relay/mailbox HTTP API."
+
+[[bin]]
+name = "buh-api"
+path = "src/main.rs"
+
+[dependencies]
+buh-entities.workspace = true
+buh-core.workspace = true
+buh-data.workspace = true
+tokio.workspace = true
+axum.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+figment.workspace = true
+clap.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+base64.workspace = true
+turso.workspace = true
+tower = { workspace = true, features = ["util"] }
+http-body-util = "0.1"
