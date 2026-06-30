@@ -1,0 +1,27 @@
+# Detached cargo-fuzz crate for buh-crypto. Not a member of the parent workspace (it carries
+# its own [workspace] table) so `cargo test/clippy --workspace` ignore it; it requires nightly
+# + `cargo install cargo-fuzz`. Run with: `cargo +nightly fuzz run wire_decode`.
+[package]
+name = "buh-crypto-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+license = "AGPL-3.0-only"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.buh-crypto]
+path = ".."
+
+[[bin]]
+name = "wire_decode"
+path = "fuzz_targets/wire_decode.rs"
+test = false
+doc = false
+bench = false

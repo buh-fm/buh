@@ -21,3 +21,6 @@ web/src/lib/crypto/pkg/
 # Editor / OS
 .DS_Store
 *.swp
+
+# Local session/handoff prompts (not part of the project record)
+doc/prompt/
