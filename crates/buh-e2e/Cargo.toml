@@ -1,0 +1,28 @@
+[package]
+name = "buh-e2e"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# A testnet end-to-end harness: drives the real client messaging path (PQ ratchet
+# seal -> push -> pull -> open -> ack) against a live buh node over PQ-mTLS. It is
+# the ONE place that links both the client crypto core (buh-crypto) and the node
+# transport (buh-api::tls); the node binary links neither side of the other.
+# Not the node, so the "node never links buh-crypto" rule is unaffected.
+
+[dependencies]
+buh-entities.workspace = true
+buh-core.workspace = true
+buh-data.workspace = true
+buh-api.workspace = true
+buh-crypto = { path = "../buh-crypto" }
+tokio.workspace = true
+tokio-rustls.workspace = true
+rustls.workspace = true
+serde_json.workspace = true
+hex.workspace = true
+rand.workspace = true
+clap.workspace = true
+anyhow.workspace = true
