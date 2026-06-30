@@ -11,6 +11,7 @@ mod error;
 mod fs_blob;
 mod migrate;
 mod stack;
+mod stub_settlement;
 mod turso_mailbox;
 
 #[cfg(feature = "s3")]
@@ -18,6 +19,7 @@ mod s3_blob;
 
 pub use fs_blob::FsBlobStore;
 pub use stack::DataStack;
+pub use stub_settlement::StubSettlement;
 pub use turso_mailbox::TursoMailboxRepo;
 
 #[cfg(feature = "s3")]
