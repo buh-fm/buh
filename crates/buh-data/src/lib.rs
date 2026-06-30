@@ -8,9 +8,17 @@
 #![warn(missing_docs)]
 
 mod error;
+mod fs_blob;
 mod migrate;
 mod stack;
 mod turso_mailbox;
 
+#[cfg(feature = "s3")]
+mod s3_blob;
+
+pub use fs_blob::FsBlobStore;
 pub use stack::DataStack;
 pub use turso_mailbox::TursoMailboxRepo;
+
+#[cfg(feature = "s3")]
+pub use s3_blob::{S3BlobStore, S3Settings};

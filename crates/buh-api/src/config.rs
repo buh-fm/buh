@@ -19,6 +19,30 @@ pub struct AppConfig {
     pub log_format: String,
     /// Relay tuning knobs.
     pub relay: RelayConfig,
+    /// Blob-role configuration (disabled by default — a node opts into the blob role).
+    pub blob: BlobConfig,
+}
+
+/// Blob-role configuration. A node runs the blob role only when `enabled` is set; it then
+/// stores opaque, client-encrypted ciphertext (`doc/design.md` §3.2).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlobConfig {
+    /// Whether this node runs the blob role at all.
+    pub enabled: bool,
+    /// Backend: `"fs"` (filesystem/ZFS) or `"s3"` (S3/MinIO — requires the `s3` build feature).
+    pub backend: String,
+    /// Root directory for the `fs` backend.
+    pub fs_root: String,
+    /// Maximum accepted blob size, in bytes.
+    pub max_blob_bytes: usize,
+    /// `s3` endpoint URL (e.g. `http://localhost:9000`).
+    pub s3_endpoint: String,
+    /// `s3` region label.
+    pub s3_region: String,
+    /// `s3` access key id.
+    pub s3_access_key: String,
+    /// `s3` secret access key.
+    pub s3_secret_key: String,
 }
 
 /// Relay tuning knobs, mirrored into [`CoreConfig`].
@@ -50,6 +74,16 @@ impl Default for AppConfig {
                 max_pull_limit: core.max_pull_limit,
                 max_wait_seconds: 30,
             },
+            blob: BlobConfig {
+                enabled: false,
+                backend: "fs".to_string(),
+                fs_root: "buh-blobs".to_string(),
+                max_blob_bytes: core.max_blob_bytes,
+                s3_endpoint: String::new(),
+                s3_region: "us-east-1".to_string(),
+                s3_access_key: String::new(),
+                s3_secret_key: String::new(),
+            },
         }
     }
 }
@@ -66,7 +100,7 @@ impl AppConfig {
         Ok(cfg)
     }
 
-    /// The [`CoreConfig`] derived from the relay knobs.
+    /// The [`CoreConfig`] derived from the relay/blob knobs.
     #[must_use]
     pub fn core_config(&self) -> CoreConfig {
         CoreConfig {
@@ -74,6 +108,7 @@ impl AppConfig {
             max_ttl_seconds: self.relay.max_ttl_seconds,
             max_payload_bytes: self.relay.max_payload_bytes,
             max_pull_limit: self.relay.max_pull_limit,
+            max_blob_bytes: self.blob.max_blob_bytes,
         }
     }
 }

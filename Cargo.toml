@@ -33,6 +33,12 @@ tower-http = { version = "0.6", features = ["trace", "limit", "cors"] }
 # Not sqlx — the turso crate is the native async API. All SQL is centralised in buh-data.
 turso = "0.4"
 
+# Object store for opaque media blobs (buh-data `s3` feature only; a node holds ciphertext it
+# cannot read). Filesystem/ZFS is the default backend and needs none of these.
+aws-config = { version = "1", default-features = false, features = ["behavior-version-latest", "rt-tokio"] }
+aws-sdk-s3 = { version = "1", default-features = false, features = ["rt-tokio"] }
+aws-credential-types = "1"
+
 # Config
 figment = { version = "0.10", features = ["toml", "env"] }
 

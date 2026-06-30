@@ -21,9 +21,13 @@ export {
   accept_session as acceptSession,
   encrypt_message as encryptMessage,
   decrypt_message as decryptMessage,
+  // Media facade — per-file content-key sealing for the blob path.
+  seal_media as sealMedia,
+  open_media as openMedia,
   PrekeyMaterial,
   ParsedInvite,
   InitiatedSession,
   EncryptedMessage,
   DecryptedMessage,
+  SealedMedia,
 } from "./pkg/buh_crypto";

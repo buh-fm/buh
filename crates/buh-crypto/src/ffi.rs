@@ -13,6 +13,7 @@ use wasm_bindgen::prelude::wasm_bindgen;
 
 use crate::identity::{IdentityKeyPair, SEED_LEN};
 use crate::invite::{CA_FINGERPRINT_LEN, INVITE_NONCE_LEN, Invite, QueueDescriptor};
+use crate::media::{self, MediaKey};
 use crate::pqxdh::{InitialMessage, initiate, respond};
 use crate::prekey::{PrekeyBundle, PrekeySecrets};
 use crate::ratchet::RatchetState;
@@ -365,4 +366,53 @@ pub fn decrypt_message(session: &[u8], message: &[u8]) -> Result<DecryptedMessag
         session: state.to_bytes(),
         plaintext,
     })
+}
+
+// ===========================================================================================
+// Media facade — per-file content-key sealing for the blob path (§3.2).
+// ===========================================================================================
+
+/// The result of sealing a media file: the small key blob to fold into the ratchet envelope,
+/// and the opaque ciphertext to upload to a blob node.
+#[wasm_bindgen]
+pub struct SealedMedia {
+    key_material: Vec<u8>,
+    ciphertext: Vec<u8>,
+}
+
+#[wasm_bindgen]
+impl SealedMedia {
+    /// The single-use content key (`key ‖ nonce`, 56 bytes). Send this through the encrypted
+    /// envelope with the blob locator; never give it to the blob node.
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn key_material(&self) -> Vec<u8> {
+        self.key_material.clone()
+    }
+    /// The opaque ciphertext to upload (the blob node stores these bytes and cannot read them).
+    #[wasm_bindgen(getter)]
+    #[must_use]
+    pub fn ciphertext(&self) -> Vec<u8> {
+        self.ciphertext.clone()
+    }
+}
+
+/// Seal a media file under a fresh per-file content key. Returns the key material to fold into
+/// the envelope and the ciphertext to upload.
+#[wasm_bindgen]
+#[must_use]
+pub fn seal_media(plaintext: &[u8]) -> SealedMedia {
+    let (key, ciphertext) = media::seal_media(plaintext);
+    SealedMedia {
+        key_material: key.to_bytes().to_vec(),
+        ciphertext,
+    }
+}
+
+/// Open media `ciphertext` (downloaded from a blob node) with the `key_material` that arrived
+/// in the envelope. Throws on any key/tag mismatch.
+#[wasm_bindgen]
+pub fn open_media(key_material: &[u8], ciphertext: &[u8]) -> Result<Vec<u8>, JsError> {
+    let key = MediaKey::from_bytes(key_material).map_err(js)?;
+    media::open_media(&key, ciphertext).map_err(js)
 }

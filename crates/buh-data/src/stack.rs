@@ -1,5 +1,6 @@
 //! Wiring: open the embedded Turso datastore and assemble a [`Ctx`] of port adapters.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use turso::Builder;
@@ -8,6 +9,7 @@ use buh_core::CoreError;
 use buh_core::context::{CoreConfig, Ctx};
 
 use crate::error::repo;
+use crate::fs_blob::FsBlobStore;
 use crate::turso_mailbox::TursoMailboxRepo;
 
 /// The assembled data stack: the database handle (for migrations) and a ready-to-use [`Ctx`].
@@ -27,10 +29,26 @@ impl DataStack {
         let mailbox = Arc::new(TursoMailboxRepo::new(db.clone()));
         let ctx = Ctx {
             mailbox,
+            blob: None,
             config: core_config,
         };
 
         Ok(Self { db, ctx })
+    }
+
+    /// Attach a filesystem blob backend rooted at `root`, enabling the node's blob role.
+    #[must_use]
+    pub fn with_fs_blob(mut self, root: impl Into<PathBuf>) -> Self {
+        self.ctx.blob = Some(Arc::new(FsBlobStore::new(root)));
+        self
+    }
+
+    /// Attach an S3/MinIO blob backend, enabling the node's blob role (`s3` feature).
+    #[cfg(feature = "s3")]
+    #[must_use]
+    pub fn with_s3_blob(mut self, settings: &crate::s3_blob::S3Settings) -> Self {
+        self.ctx.blob = Some(Arc::new(crate::s3_blob::S3BlobStore::new(settings)));
+        self
     }
 
     /// Run the embedded migrations.

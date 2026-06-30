@@ -7,11 +7,14 @@
 use std::time::Duration;
 
 use axum::Json;
+use axum::body::Bytes;
 use axum::extract::{Path, Query, State};
+use axum::http::{StatusCode, header};
+use axum::response::{IntoResponse, Response};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use buh_core::mailbox;
+use buh_core::{blob, mailbox};
 use buh_entities::{
     AckAccepted, EnvelopeAccepted, EnvelopeId, PullResponse, PushEnvelope, QueueId,
 };
@@ -84,4 +87,26 @@ pub async fn ack(
         .map_err(|_| buh_entities::EntityError::Empty("envelope_id"))?;
     let acknowledged = mailbox::ack(&state.ctx, &queue_id, envelope_id).await?;
     Ok(Json(AckAccepted { acknowledged }))
+}
+
+/// `PUT /v1/blob/{bucket}/{key}` — store opaque, client-encrypted ciphertext. The node holds
+/// bytes it cannot read; possession of the locator is the entire capability. `501` if this node
+/// does not run the blob role. The body size is bounded by the route's request-body limit.
+pub async fn blob_put(
+    State(state): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+    body: Bytes,
+) -> Result<StatusCode, ApiError> {
+    blob::put(&state.ctx, &bucket, &key, body.to_vec()).await?;
+    Ok(StatusCode::CREATED)
+}
+
+/// `GET /v1/blob/{bucket}/{key}` — fetch the opaque ciphertext. `404` if absent, `501` if this
+/// node does not run the blob role.
+pub async fn blob_get(
+    State(state): State<AppState>,
+    Path((bucket, key)): Path<(String, String)>,
+) -> Result<Response, ApiError> {
+    let bytes = blob::get(&state.ctx, &bucket, &key).await?;
+    Ok(([(header::CONTENT_TYPE, "application/octet-stream")], bytes).into_response())
 }

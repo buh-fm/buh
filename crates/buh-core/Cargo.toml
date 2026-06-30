@@ -12,3 +12,6 @@ buh-entities.workspace = true
 async-trait.workspace = true
 chrono.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+tokio.workspace = true

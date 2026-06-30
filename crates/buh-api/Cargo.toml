@@ -11,6 +11,11 @@ description = "buh node daemon: blind relay/mailbox HTTP API."
 name = "buh-api"
 path = "src/main.rs"
 
+[features]
+default = []
+# Build the S3/MinIO blob backend into the daemon (forwards to buh-data/s3).
+s3 = ["buh-data/s3"]
+
 [dependencies]
 buh-entities.workspace = true
 buh-core.workspace = true

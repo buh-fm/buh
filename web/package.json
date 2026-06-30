@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "wasm": "wasm-pack build ../crates/buh-crypto --target bundler --out-dir ../web/src/lib/crypto/pkg --features wasm",
+    "wasm": "wasm-pack build ../crates/buh-crypto --target bundler --out-dir \"$PWD/src/lib/crypto/pkg\" --features wasm",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview"

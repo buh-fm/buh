@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
 
+pub mod blob;
 pub mod context;
 pub mod error;
 pub mod mailbox;

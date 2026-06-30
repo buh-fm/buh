@@ -13,7 +13,7 @@ use clap::Parser;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
-use buh_api::config::AppConfig;
+use buh_api::config::{AppConfig, BlobConfig};
 use buh_api::router::router;
 use buh_api::state::AppState;
 use buh_data::DataStack;
@@ -37,9 +37,14 @@ async fn main() -> anyhow::Result<()> {
     let config = AppConfig::load(cli.config.as_deref())?;
     init_tracing(&config.log_format);
 
-    let stack = DataStack::connect(&config.db_path, config.core_config()).await?;
+    let mut stack = DataStack::connect(&config.db_path, config.core_config()).await?;
     stack.migrate().await?;
     tracing::info!(db_path = %config.db_path, "datastore ready");
+
+    if config.blob.enabled {
+        stack = wire_blob(stack, &config.blob)?;
+        tracing::info!(backend = %config.blob.backend, "blob role enabled");
+    }
 
     let state = AppState {
         ctx: stack.ctx.clone(),
@@ -54,6 +59,31 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     Ok(())
+}
+
+/// Attach the configured blob backend to the data stack, enabling the node's blob role. The
+/// `s3` backend requires the daemon to be built with the `s3` feature.
+fn wire_blob(stack: DataStack, blob: &BlobConfig) -> anyhow::Result<DataStack> {
+    match blob.backend.as_str() {
+        "fs" => Ok(stack.with_fs_blob(&blob.fs_root)),
+        "s3" => {
+            #[cfg(feature = "s3")]
+            {
+                let settings = buh_data::S3Settings {
+                    endpoint: blob.s3_endpoint.clone(),
+                    region: blob.s3_region.clone(),
+                    access_key: blob.s3_access_key.clone(),
+                    secret_key: blob.s3_secret_key.clone(),
+                };
+                Ok(stack.with_s3_blob(&settings))
+            }
+            #[cfg(not(feature = "s3"))]
+            {
+                anyhow::bail!("blob backend \"s3\" requires building buh-api with the `s3` feature")
+            }
+        }
+        other => anyhow::bail!("unknown blob backend {other:?} (expected \"fs\" or \"s3\")"),
+    }
 }
 
 /// Initialize structured logging: JSON under journald (or when `log_format = "json"`),

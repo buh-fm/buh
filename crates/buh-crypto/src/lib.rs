@@ -1,8 +1,9 @@
 //! buh client cryptography core.
 //!
 //! This is the smart endpoint's crypto: post-quantum identity (ML-DSA), the PQXDH hybrid
-//! handshake (X25519 + ML-KEM-768), the Double Ratchet, media sealing (XChaCha20-Poly1305),
-//! the one-time signed invite, and the versioned wire codec. It compiles to WASM via
+//! handshake (X25519 + ML-KEM-768), the Double Ratchet, per-file media sealing
+//! (XChaCha20-Poly1305 content keys, [`media`]), the one-time signed invite, and the versioned
+//! wire codec. It compiles to WASM via
 //! `wasm-pack` for the Vite/React web client and is reusable by a future Tauri/Rust client.
 //!
 //! The node never links this crate — a relay treats envelopes as opaque bytes
@@ -18,6 +19,7 @@ pub mod error;
 pub mod identity;
 pub mod invite;
 pub mod kem;
+pub mod media;
 pub mod pqxdh;
 pub mod prekey;
 pub mod ratchet;
