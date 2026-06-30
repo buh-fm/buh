@@ -37,6 +37,10 @@ wasm-bindgen = { workspace = true, optional = true }
 [dev-dependencies]
 hex = { workspace = true }
 
+# proptest (via wait-timeout) does not build for wasm; the property tests run on native only.
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+proptest = { workspace = true }
+
 # On the wasm target, getrandom routes through the JS Crypto API (`wasm_js` backend, paired
 # with the cfg in .cargo/config.toml), and the KATs also run under wasm-bindgen-test.
 [target.'cfg(target_arch = "wasm32")'.dependencies]

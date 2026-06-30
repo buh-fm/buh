@@ -19,6 +19,7 @@ pub mod identity;
 pub mod kem;
 pub mod pqxdh;
 pub mod prekey;
+pub mod ratchet;
 pub mod wire;
 
 #[cfg(feature = "wasm")]

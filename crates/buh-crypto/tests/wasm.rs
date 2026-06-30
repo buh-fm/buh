@@ -9,6 +9,9 @@
 
 use buh_crypto::aead;
 use buh_crypto::identity::IdentityKeyPair;
+use buh_crypto::pqxdh::{InitialMessage, initiate, respond};
+use buh_crypto::prekey::PrekeyBundle;
+use buh_crypto::ratchet::RatchetState;
 use buh_crypto::wire::{FLAG_HANDSHAKE, Frame, TAG_IDENTITY_PUB, TAG_PQ_EPOCH, TAG_SIGNATURE};
 use wasm_bindgen_test::wasm_bindgen_test;
 
@@ -86,4 +89,26 @@ fn identity_deterministic_matches_native() {
         sig_digest,
         "fa1505282148194ecd8d8608eddf3a21b3645d20da99d39e44a904b4ec32d3cc"
     );
+}
+
+#[wasm_bindgen_test]
+fn full_handshake_and_ratchet_in_wasm() {
+    // The entire client path — ML-KEM + X25519 hybrid PQXDH and the Double Ratchet — running
+    // in the browser over the wasm_js getrandom backend, the same code the web client loads.
+    let alice = IdentityKeyPair::generate();
+    let bob = IdentityKeyPair::generate();
+    let (bob_secrets, bob_bundle) = PrekeyBundle::generate(&bob, true);
+
+    let (msg, root_a) = initiate(&alice, &bob_bundle);
+    let msg = InitialMessage::decode(&msg.encode()).unwrap();
+    let root_b = respond(&bob_bundle, &bob_secrets, &msg).unwrap();
+    assert_eq!(root_a, root_b);
+
+    let mut alice_r = RatchetState::initiator(root_a, bob_bundle.signed_prekey);
+    let mut bob_r = RatchetState::responder(root_b, bob_secrets.signed_prekey);
+
+    let c1 = alice_r.encrypt(b"hello from wasm").unwrap();
+    assert_eq!(bob_r.decrypt(&c1).unwrap(), b"hello from wasm");
+    let c2 = bob_r.encrypt(b"hi back").unwrap();
+    assert_eq!(alice_r.decrypt(&c2).unwrap(), b"hi back");
 }

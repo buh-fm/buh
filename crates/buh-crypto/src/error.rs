@@ -26,6 +26,11 @@ pub enum CryptoError {
         /// What was being parsed (e.g. "identity public key").
         what: &'static str,
     },
+
+    /// A ratchet operation could not proceed (no sending chain yet, too many skipped
+    /// messages, …). Carries a static reason, never secret state.
+    #[error("ratchet: {0}")]
+    Ratchet(&'static str),
 }
 
 impl CryptoError {
