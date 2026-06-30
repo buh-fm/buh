@@ -106,6 +106,41 @@ export default function App() {
             </tbody>
           </table>
 
+          <h2>Media path (the blob node is blind)</h2>
+          {result.media.available ? (
+            <>
+              <p style={{ color: "#555", fontSize: "0.9rem" }}>
+                Alice sealed a file under a per-file content key and uploaded the ciphertext. Only
+                the content key + locator travelled through the ratchet; the blob node stored bytes
+                it cannot read.
+              </p>
+              <table style={{ ...mono, fontSize: "0.8rem", borderCollapse: "collapse", width: "100%" }}>
+                <tbody>
+                  <tr style={{ borderBottom: "1px solid #eee" }}>
+                    <td style={{ paddingRight: "1rem", color: "#888" }}>locator</td>
+                    <td data-testid="media-locator">{result.media.locator}</td>
+                  </tr>
+                  <tr style={{ borderBottom: "1px solid #eee" }}>
+                    <td style={{ paddingRight: "1rem", color: "#888" }}>stored (sealed)</td>
+                    <td>
+                      {result.media.ciphertextPreview} ({result.media.storedBytes} bytes)
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ paddingRight: "1rem", color: "#888" }}>Bob recovered</td>
+                    <td>
+                      <strong data-testid="media-recovered">“{result.media.recovered}”</strong>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </>
+          ) : (
+            <p style={{ color: "#555", fontSize: "0.9rem" }} data-testid="media-skipped">
+              {result.media.note}
+            </p>
+          )}
+
           <h2>Node CA pin (PQ-mTLS)</h2>
           <p style={{ color: "#555", fontSize: "0.9rem" }}>
             {result.caFingerprint ? (

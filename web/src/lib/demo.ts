@@ -13,11 +13,14 @@ import {
   generateIdentity,
   identityPublicKey,
   initiateSession,
+  openMedia,
   parseInvite,
   publishablePrekeyBundle,
+  sealMedia,
 } from "./crypto";
-import { fromHex, isAllZero, randomQueueId, toBase64, toHex } from "./bytes";
+import { fromBase64, fromHex, isAllZero, randomQueueId, toBase64, toHex } from "./bytes";
 import type { KeyStore } from "./keystore";
+import * as blob from "./blob";
 import * as relay from "./relay";
 
 const enc = new TextEncoder();
@@ -28,6 +31,22 @@ export interface RelayEnvelopeView {
   envelopeId: string;
   payloadPreview: string;
   bytes: number;
+}
+
+/// What the media path produced — proof the blob node is blind.
+export interface MediaView {
+  /// Whether the blob role was available on the node (false → media path skipped).
+  available: boolean;
+  /// Human-readable status / why it was skipped.
+  note: string;
+  /// `bucket/key` the node stored the ciphertext under.
+  locator?: string;
+  /// Number of opaque ciphertext bytes the node holds.
+  storedBytes?: number;
+  /// A base64 head of the ciphertext the node stored (opaque to it).
+  ciphertextPreview?: string;
+  /// The plaintext Bob recovered after fetching the blob and applying the content key.
+  recovered?: string;
 }
 
 export interface DemoResult {
@@ -41,6 +60,8 @@ export interface DemoResult {
   caFingerprint: string;
   /// Whether the relay client verified the pinned CA against the node it talked to.
   caPinVerified: boolean;
+  /// The media path outcome (the blob node holds opaque ciphertext only).
+  media: MediaView;
 }
 
 const fingerprint = (idPub: Uint8Array) => toHex(idPub).slice(0, 16);
@@ -160,6 +181,18 @@ export async function runDemo(
   const bobDecrypted = dec.decode(openedReply.plaintext);
   for (const e of reply) await relay.ack(bobQueue, e.envelope_id);
 
+  // --- Media path: Alice seals a file under a per-file content key, uploads the opaque
+  //     ciphertext to the blob node, and sends ONLY the {content key + locator} through the
+  //     ratchet. The blob node holds bytes it cannot read; Bob fetches and opens them. ---
+  const media = await runMediaPath(
+    store,
+    log,
+    relayView,
+    bobQueue,
+    aliceToBob.session,
+    openedReply.session,
+  );
+
   log("Done — message sealed end-to-end through the blind relay.");
 
   return {
@@ -171,5 +204,72 @@ export async function runDemo(
     relayView,
     caFingerprint: isAllZero(parsed.ca_fingerprint) ? "" : caFingerprintHex,
     caPinVerified,
+    media,
   };
+}
+
+/// Run the media path: seal → blob PUT → ratchet the locator+key → blob GET → openMedia. Returns
+/// a [`MediaView`] describing what the blob node stored (opaque) and what Bob recovered. Degrades
+/// gracefully to `available: false` when the node does not run the blob role.
+async function runMediaPath(
+  store: KeyStore,
+  log: (line: string) => void,
+  relayView: RelayEnvelopeView[],
+  bobQueue: Uint8Array,
+  aliceSession: Uint8Array,
+  bobSession: Uint8Array,
+): Promise<MediaView> {
+  const bucket = "media";
+  try {
+    log("Alice: seal media (per-file content key) + upload opaque ciphertext to the blob node…");
+    const mediaPlaintext = enc.encode("📷 a sealed photo — bytes the blob node can never read");
+    const sealed = sealMedia(mediaPlaintext);
+    const locator = blob.randomLocator();
+    await blob.putBlob(bucket, locator, sealed.ciphertext);
+
+    // The descriptor carries only {locator, content key} — never plaintext, never to the node.
+    const descriptor = JSON.stringify({
+      bucket,
+      key: locator,
+      keyMaterial: toBase64(sealed.key_material),
+    });
+    const aliceMedia = encryptMessage(aliceSession, enc.encode(descriptor));
+    await store.put("alice/session", aliceMedia.session);
+    await relay.push(bobQueue, aliceMedia.message);
+
+    log("Bob ← relay: pull the descriptor, fetch the opaque blob, open it with the content key…");
+    const inbound = await relay.pull(bobQueue, 5);
+    if (inbound.length < 1) throw new Error("expected the media descriptor envelope");
+    inbound.forEach((e) => relayView.push(view(bobQueue, e)));
+    const openedDesc = decryptMessage(bobSession, inbound[0].payload);
+    await store.put("bob/session", openedDesc.session);
+    for (const e of inbound) await relay.ack(bobQueue, e.envelope_id);
+
+    const desc = JSON.parse(dec.decode(openedDesc.plaintext)) as {
+      bucket: string;
+      key: string;
+      keyMaterial: string;
+    };
+    const ciphertext = await blob.getBlob(desc.bucket, desc.key);
+    const recovered = openMedia(fromBase64(desc.keyMaterial), ciphertext);
+
+    log("Media recovered end-to-end — the blob node never saw plaintext.");
+    return {
+      available: true,
+      note: "the blob node stored opaque ciphertext; only the content key + locator went through the ratchet",
+      locator: `${desc.bucket}/${desc.key}`,
+      storedBytes: ciphertext.length,
+      ciphertextPreview: `${toBase64(ciphertext).slice(0, 44)}…`,
+      recovered: dec.decode(recovered),
+    };
+  } catch (e) {
+    if (e instanceof blob.BlobRoleUnavailable) {
+      log("Media path skipped: this node does not run the blob role.");
+      return {
+        available: false,
+        note: "this node does not run the blob role — start buh-api with [blob] enabled to see the media path",
+      };
+    }
+    throw e;
+  }
 }
