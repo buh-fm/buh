@@ -54,6 +54,23 @@ Either model from `asset/readme.md`:
   host (the dogfood node uses this).
 - **Manual** — `sudo PKI_SANS='["your-node.example"]' ./asset/deploy.sh` on the host.
 
+#### Set the leaf SANs to *your* node's FQDN
+
+The node stamps its TLS leaf with the subject alternative names (SANs) you give it
+in `[pki].sans` — set these to **the public FQDN other operators use to reach you**
+(the host part of your `host:31415` edge address), e.g. `["your-node.example"]`. Use
+an IP-literal SAN (`["203.0.113.10"]`) if you have no DNS. Where you set it:
+
+- **CI:** the `NODE_SANS` env in your `deploy.yml` (a TOML array string).
+- **Manual:** `PKI_SANS` to `deploy.sh`, or `[pki].sans` in `/etc/buh/config.toml`.
+
+Why bother, given buh peers pin by **CA fingerprint** and ignore the hostname? Two
+reasons: a standards-compliant TLS client (a browser, `curl`, future tooling) that
+*does* validate the hostname will reject a leaf whose SAN doesn't match the name it
+dialed; and it keeps your certificate honest about who it claims to be. Changing
+`sans` re-issues the leaf on the next deploy/rotation — the CA fingerprint peers
+pinned is unaffected, so no one needs to re-pin.
+
 Confirm it is healthy (on the host, via the loopback admin API):
 
 ```sh
