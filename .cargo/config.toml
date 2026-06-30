@@ -1,0 +1,6 @@
+# getrandom 0.3 has no default backend for wasm32-unknown-unknown; select the JS Crypto
+# backend so ML-DSA keygen, AEAD nonces, and ephemeral key material get real randomness in
+# the browser. Paired with the `wasm_js` feature on getrandom for the wasm target (see
+# crates/buh-crypto/Cargo.toml). Native targets are unaffected.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="wasm_js"']

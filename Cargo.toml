@@ -47,10 +47,18 @@ tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
 
 # Client crypto core (buh-crypto only; the node never links these)
 ml-dsa = "0.1.1"
-chacha20poly1305 = "0.10"
-getrandom = "0.3"
+# default-features off drops the old getrandom-0.2 RNG path (we supply nonces ourselves);
+# `alloc` keeps the Vec-returning encrypt/decrypt.
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+# 0.4 to match the version crypto-common (under ml-dsa) pulls, so the wasm_js backend is
+# enabled once for a single getrandom in the tree.
+getrandom = "0.4"
 sha2 = "0.10"
 hkdf = "0.12"
+
+# WASM FFI (buh-crypto `wasm` feature only)
+wasm-bindgen = "0.2"
+wasm-bindgen-test = "0.3"
 
 # Misc
 chrono = { version = "0.4", features = ["serde"] }

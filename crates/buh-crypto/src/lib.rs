@@ -8,13 +8,18 @@
 //! The node never links this crate — a relay treats envelopes as opaque bytes
 //! (`doc/design.md` §3.1). Implementation lands in Phases 2–4; this is the scaffold.
 
-#![forbid(unsafe_code)]
+// The native core is unsafe-free. The `wasm` feature relaxes this only because wasm-bindgen's
+// generated FFI glue (src/ffi.rs) contains `unsafe`; the cryptographic code never does.
+#![cfg_attr(not(feature = "wasm"), forbid(unsafe_code))]
 #![warn(missing_docs)]
 
 pub mod aead;
 pub mod error;
 pub mod identity;
 pub mod wire;
+
+#[cfg(feature = "wasm")]
+pub mod ffi;
 
 pub use error::CryptoError;
 

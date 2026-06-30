@@ -2,10 +2,20 @@
 /target
 **/*.rs.bk
 
+# cargo-fuzz build output + generated corpora/artifacts
+crates/*/fuzz/target/
+crates/*/fuzz/corpus/
+crates/*/fuzz/artifacts/
+crates/*/fuzz/Cargo.lock
+
 # Node / web
 node_modules/
 web/dist/
 web/.vite/
+# tsc -b project-build artifacts
+*.tsbuildinfo
+web/vite.config.js
+web/vite.config.d.ts
 
 # wasm-pack output (generated from buh-crypto)
 web/src/lib/crypto/pkg/

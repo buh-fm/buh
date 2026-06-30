@@ -12,9 +12,10 @@ description = "buh client cryptography core (PQ identity, PQXDH, Double Ratchet,
 crate-type = ["cdylib", "rlib"]
 
 [features]
-# Enables the wasm-bindgen FFI surface (Phase 4). Off by default so the core stays
-# `#![forbid(unsafe_code)]` and dependency-clean for native builds and tests.
-wasm = []
+# Enables the wasm-bindgen FFI surface (src/ffi.rs). Off by default so the core stays
+# `#![forbid(unsafe_code)]` (relaxed only under this feature, for bindgen's generated code)
+# and dependency-clean for native builds and tests. wasm-pack builds pass `--features wasm`.
+wasm = ["dep:wasm-bindgen"]
 
 [dependencies]
 thiserror = { workspace = true }
@@ -23,9 +24,18 @@ thiserror = { workspace = true }
 ml-dsa = { workspace = true, features = ["getrandom"] }
 chacha20poly1305 = { workspace = true }
 # OS randomness for AEAD nonces / ephemeral material. On wasm the `wasm_js` backend is
-# selected by a target cfg (see web/ wiring); native uses the OS RNG.
+# selected by a target cfg (.cargo/config.toml); native uses the OS RNG.
 getrandom = { workspace = true }
 sha2 = { workspace = true }
+wasm-bindgen = { workspace = true, optional = true }
 
 [dev-dependencies]
 hex = { workspace = true }
+
+# On the wasm target, getrandom routes through the JS Crypto API (`wasm_js` backend, paired
+# with the cfg in .cargo/config.toml), and the KATs also run under wasm-bindgen-test.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["wasm_js"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = { workspace = true }
