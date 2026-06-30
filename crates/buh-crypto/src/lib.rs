@@ -17,6 +17,8 @@ pub mod aead;
 pub mod error;
 pub mod identity;
 pub mod kem;
+pub mod pqxdh;
+pub mod prekey;
 pub mod wire;
 
 #[cfg(feature = "wasm")]

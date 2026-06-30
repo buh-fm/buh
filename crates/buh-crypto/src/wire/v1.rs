@@ -39,6 +39,22 @@ pub const TAG_EXPIRY: u64 = 0x05;
 /// ML-DSA signature over the preceding body.
 pub const TAG_SIGNATURE: u64 = 0x06;
 
+// --- Prekey-bundle / handshake fields (Phase 3). ---
+
+/// Domain-separation context label, always the first signed field.
+pub const TAG_CONTEXT: u64 = 0x07;
+/// A long-lived signed X25519 prekey (the responder's SPK).
+pub const TAG_PREKEY_X25519: u64 = 0x08;
+/// An ML-KEM-768 encapsulation (public) key.
+pub const TAG_MLKEM_EK: u64 = 0x09;
+/// A one-time X25519 prekey (optional).
+pub const TAG_ONETIME_PREKEY: u64 = 0x0a;
+/// The initiator's ephemeral X25519 public key in a handshake.
+pub const TAG_EPHEMERAL_X25519: u64 = 0x0b;
+/// The handshake ML-KEM ciphertext (initial PQXDH encapsulation — distinct from the reserved
+/// [`TAG_PQ_KEM_CT`], which is for the future *rekey* layer).
+pub const TAG_KEM_CT: u64 = 0x0c;
+
 // --- Double Ratchet header fields (Phase 3). ---
 
 /// Sender's current ratchet DH public key.
