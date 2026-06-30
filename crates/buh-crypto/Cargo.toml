@@ -32,6 +32,8 @@ hkdf = { workspace = true }
 # `getrandom` gives ml-kem its system-RNG keygen/encapsulate (getrandom 0.4 → wasm_js on wasm).
 x25519-dalek = { workspace = true }
 ml-kem = { workspace = true, features = ["getrandom"] }
+# base64url for the `buh1:` invite wrapper (QR / paste).
+base64 = { workspace = true }
 wasm-bindgen = { workspace = true, optional = true }
 
 [dev-dependencies]

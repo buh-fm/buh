@@ -16,6 +16,7 @@
 pub mod aead;
 pub mod error;
 pub mod identity;
+pub mod invite;
 pub mod kem;
 pub mod pqxdh;
 pub mod prekey;

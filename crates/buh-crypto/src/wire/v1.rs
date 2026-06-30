@@ -54,6 +54,12 @@ pub const TAG_EPHEMERAL_X25519: u64 = 0x0b;
 /// The handshake ML-KEM ciphertext (initial PQXDH encapsulation — distinct from the reserved
 /// [`TAG_PQ_KEM_CT`], which is for the future *rekey* layer).
 pub const TAG_KEM_CT: u64 = 0x0c;
+/// Opaque 32-byte queue identifier (inside a queue descriptor).
+pub const TAG_QUEUE_ID: u64 = 0x0d;
+/// Relay base URL (inside a queue descriptor).
+pub const TAG_RELAY_URL: u64 = 0x0e;
+/// Hosting node's CA fingerprint, for pinning (inside a queue descriptor).
+pub const TAG_CA_FINGERPRINT: u64 = 0x0f;
 
 // --- Double Ratchet header fields (Phase 3). ---
 
