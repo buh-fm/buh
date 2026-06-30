@@ -1,9 +1,12 @@
 //! buh operator/admin CLI.
 //!
-//! Covers datastore migration, the TTL sweep, the per-node CA (`ca init|rotate|show`), the
-//! peer-CA trust registry (`peer trust|distrust|list`), and a mutual-PQ-mTLS connectivity check
-//! (`peer ping`) — the operator surface of the decentralised PQ-mTLS deviation
-//! (`doc/design.md` §5.1).
+//! Covers datastore migration, the per-node CA (`ca init|rotate|show`), peer-CA trust management
+//! (`peer trust|distrust|list`), and a mutual-PQ-mTLS connectivity check (`peer ping`) — the
+//! operator surface of the decentralised PQ-mTLS deviation (`doc/design.md` §5.1).
+//!
+//! `peer` commands talk to the running node's loopback admin API, because Turso locks the
+//! datastore exclusively (a second process cannot open it while the daemon runs). They fall back
+//! to opening the DB directly only when the daemon is unreachable.
 
 #![forbid(unsafe_code)]
 
@@ -31,6 +34,10 @@ struct Cli {
     /// Directory holding this node's CA (key + cert).
     #[arg(long, env = "BUH_PKI__DIR", default_value = "/var/lib/buh/pki")]
     pki_dir: String,
+    /// Loopback admin API of the running node. `peer` commands use it so they work while the
+    /// daemon holds the datastore; they fall back to the local DB only when it is unreachable.
+    #[arg(long, env = "BUH_ADMIN_URL", default_value = "http://127.0.0.1:8081")]
+    admin_url: String,
     #[command(subcommand)]
     command: Command,
 }
@@ -82,12 +89,9 @@ enum PeerCommand {
     /// List the trusted peer CAs.
     List,
     /// Verify mutual PQ-mTLS connectivity to a peer at `addr` (host:port). Succeeds only when both
-    /// nodes trust each other's CA: this node pins the peer's CA (from the trust registry) and the
-    /// peer must trust this node's CA. Reports the peer's advertised CA fingerprint + health.
-    ///
-    /// Note: like every CLI command, this opens the local datastore, which Turso locks
-    /// exclusively — so it cannot run while this host's own `buh-api` daemon is up (see the §5.1
-    /// admin-path note). Run it with the local daemon stopped, or from an operator workstation.
+    /// nodes trust each other's CA: this node pins the peer's CA (read from the running node via
+    /// the admin API, or the local DB if the daemon is down) and the peer must trust this node's
+    /// CA. Reports the peer's advertised CA fingerprint + health.
     Ping {
         /// Peer node address, `host:port` (the peer's BUH_NODE_PORT).
         addr: String,
@@ -114,7 +118,7 @@ async fn main() -> anyhow::Result<()> {
             println!("swept {removed} expired envelope(s)");
         }
         Command::Ca(cmd) => run_ca(&cli.pki_dir, cmd)?,
-        Command::Peer(cmd) => run_peer(&cli.db_path, &cli.pki_dir, cmd).await?,
+        Command::Peer(cmd) => run_peer(&cli.db_path, &cli.pki_dir, &cli.admin_url, cmd).await?,
     }
 
     Ok(())
@@ -152,41 +156,73 @@ fn run_ca(pki_dir: &str, cmd: CaCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_peer(db_path: &str, pki_dir: &str, cmd: PeerCommand) -> anyhow::Result<()> {
-    let stack = stack(db_path).await?;
-    stack.migrate().await?;
-    let registry = TursoPeerTrust::new(stack.db.clone());
+async fn run_peer(
+    db_path: &str,
+    pki_dir: &str,
+    admin_url: &str,
+    cmd: PeerCommand,
+) -> anyhow::Result<()> {
+    let admin = admin_hostport(admin_url);
 
     match cmd {
         PeerCommand::Trust { ca_fp, note } => {
-            registry.trust(&ca_fp, note.as_deref()).await?;
-            println!("trusting peer CA {ca_fp}");
+            let body = serde_json::json!({ "ca_fingerprint": ca_fp, "note": note }).to_string();
+            match admin_req(&admin, "POST", "/admin/peers", Some(&body)).await {
+                Some((status, _)) => {
+                    ensure_ok(status)?;
+                    println!("trusting peer CA {ca_fp} (applied to the running node)");
+                }
+                None => {
+                    open_registry(db_path)
+                        .await?
+                        .trust(&ca_fp, note.as_deref())
+                        .await?;
+                    println!("trusting peer CA {ca_fp} (direct DB — daemon not running)");
+                }
+            }
         }
         PeerCommand::Distrust { ca_fp } => {
-            if registry.distrust(&ca_fp).await? {
-                println!("distrusted peer CA {ca_fp}");
-            } else {
-                println!("peer CA {ca_fp} was not trusted");
+            match admin_req(&admin, "DELETE", &format!("/admin/peers/{ca_fp}"), None).await {
+                Some((status, body)) => {
+                    ensure_ok(status)?;
+                    let removed = json_bool(&body, "removed");
+                    println!(
+                        "{} (applied to the running node)",
+                        if removed {
+                            format!("distrusted peer CA {ca_fp}")
+                        } else {
+                            format!("peer CA {ca_fp} was not trusted")
+                        }
+                    );
+                }
+                None => {
+                    let removed = open_registry(db_path).await?.distrust(&ca_fp).await?;
+                    let how = "direct DB — daemon not running";
+                    if removed {
+                        println!("distrusted peer CA {ca_fp} ({how})");
+                    } else {
+                        println!("peer CA {ca_fp} was not trusted ({how})");
+                    }
+                }
             }
         }
         PeerCommand::List => {
-            let peers = registry.list().await?;
+            let peers = trusted_fingerprints_with_notes(&admin, db_path).await?;
             if peers.is_empty() {
                 println!("no trusted peer CAs");
             }
-            for p in peers {
-                match p.note {
-                    Some(note) => println!("{}  {}", p.ca_fingerprint, note),
-                    None => println!("{}", p.ca_fingerprint),
+            for (fp, note) in peers {
+                match note {
+                    Some(note) => println!("{fp}  {note}"),
+                    None => println!("{fp}"),
                 }
             }
         }
         PeerCommand::Ping { addr } => {
-            // Present this node's leaf and pin every CA currently in the trust registry.
+            // Present this node's leaf and pin every CA the running node currently trusts.
             let ca = RcgenNodeCa::load_or_init(pki_dir, default_sans(), NOMINAL_LEAF_TTL)?;
-            let trusted = registry.list().await?;
-            let trust =
-                TrustStore::from_fingerprints(trusted.into_iter().map(|p| p.ca_fingerprint));
+            let trusted = trusted_fingerprints_with_notes(&admin, db_path).await?;
+            let trust = TrustStore::from_fingerprints(trusted.into_iter().map(|(fp, _)| fp));
             let node_tls = NodeTls::new(Arc::new(ca), trust)?;
 
             match probe_peer(&node_tls, &addr).await {
@@ -208,6 +244,108 @@ async fn run_peer(db_path: &str, pki_dir: &str, cmd: PeerCommand) -> anyhow::Res
         }
     }
     Ok(())
+}
+
+/// Read the trusted peer CAs (with notes) from the running node's admin API, falling back to the
+/// local datastore when the daemon is not running.
+async fn trusted_fingerprints_with_notes(
+    admin: &str,
+    db_path: &str,
+) -> anyhow::Result<Vec<(String, Option<String>)>> {
+    if let Some((status, body)) = admin_req(admin, "GET", "/admin/peers", None).await {
+        ensure_ok(status)?;
+        let v: serde_json::Value = serde_json::from_str(&body)?;
+        let peers = v["peers"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|p| {
+                        let fp = p["ca_fingerprint"].as_str()?.to_string();
+                        let note = p["note"].as_str().map(str::to_string);
+                        Some((fp, note))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        return Ok(peers);
+    }
+    // Daemon down: read the DB directly.
+    let peers = open_registry(db_path).await?.list().await?;
+    Ok(peers
+        .into_iter()
+        .map(|p| (p.ca_fingerprint, p.note))
+        .collect())
+}
+
+/// Open the peer-trust registry directly (the daemon-down fallback path).
+async fn open_registry(db_path: &str) -> anyhow::Result<TursoPeerTrust> {
+    let stack = stack(db_path).await?;
+    stack.migrate().await?;
+    Ok(TursoPeerTrust::new(stack.db.clone()))
+}
+
+/// Turn a non-2xx admin response into an error.
+fn ensure_ok(status: u16) -> anyhow::Result<()> {
+    if (200..300).contains(&status) {
+        Ok(())
+    } else {
+        anyhow::bail!("admin API returned HTTP {status}")
+    }
+}
+
+/// Extract `http://host:port` (or `host:port`) down to the `host:port` the admin client dials.
+fn admin_hostport(url: &str) -> String {
+    let s = url.strip_prefix("http://").unwrap_or(url);
+    s.split('/').next().unwrap_or(s).to_string()
+}
+
+/// Best-effort boolean field lookup in a small JSON body.
+fn json_bool(body: &str, key: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|v| v[key].as_bool())
+        .unwrap_or(false)
+}
+
+/// Send a minimal HTTP/1.1 request to the loopback admin API. Returns `Some((status, body))` on a
+/// completed exchange, or `None` when the daemon is unreachable (so the caller falls back to the
+/// local datastore). The admin API is plain HTTP on loopback — no TLS.
+async fn admin_req(
+    hostport: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> Option<(u16, String)> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    let mut stream = tokio::net::TcpStream::connect(hostport).await.ok()?;
+    let mut req = format!("{method} {path} HTTP/1.1\r\nHost: {hostport}\r\nConnection: close\r\n");
+    if let Some(b) = body {
+        req.push_str("Content-Type: application/json\r\n");
+        req.push_str(&format!("Content-Length: {}\r\n", b.len()));
+    }
+    req.push_str("\r\n");
+    if let Some(b) = body {
+        req.push_str(b);
+    }
+
+    stream.write_all(req.as_bytes()).await.ok()?;
+    let mut buf = Vec::new();
+    stream.read_to_end(&mut buf).await.ok()?;
+    let resp = String::from_utf8_lossy(&buf);
+
+    let status = resp
+        .lines()
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()?;
+    let body = resp
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b.to_string())
+        .unwrap_or_default();
+    Some((status, body))
 }
 
 /// SANs are only meaningful for issued leaves, not CA management; stamp a sane default.
