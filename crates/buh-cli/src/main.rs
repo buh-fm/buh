@@ -1,16 +1,20 @@
 //! buh operator/admin CLI.
 //!
-//! Covers datastore migration, the TTL sweep, the per-node CA (`ca init|rotate|show`), and the
-//! peer-CA trust registry (`peer trust|distrust|list`) — the operator surface of the
-//! decentralised PQ-mTLS deviation (`doc/design.md` §5.1).
+//! Covers datastore migration, the TTL sweep, the per-node CA (`ca init|rotate|show`), the
+//! peer-CA trust registry (`peer trust|distrust|list`), and a mutual-PQ-mTLS connectivity check
+//! (`peer ping`) — the operator surface of the decentralised PQ-mTLS deviation
+//! (`doc/design.md` §5.1).
 
 #![forbid(unsafe_code)]
 
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
+use buh_api::peer::probe_peer;
+use buh_api::tls::{NodeTls, TrustStore};
 use buh_core::{CoreConfig, NodePki, PeerTrustRegistry, mailbox};
 use buh_data::{DataStack, RcgenNodeCa, TursoPeerTrust};
 
@@ -77,6 +81,17 @@ enum PeerCommand {
     },
     /// List the trusted peer CAs.
     List,
+    /// Verify mutual PQ-mTLS connectivity to a peer at `addr` (host:port). Succeeds only when both
+    /// nodes trust each other's CA: this node pins the peer's CA (from the trust registry) and the
+    /// peer must trust this node's CA. Reports the peer's advertised CA fingerprint + health.
+    ///
+    /// Note: like every CLI command, this opens the local datastore, which Turso locks
+    /// exclusively — so it cannot run while this host's own `buh-api` daemon is up (see the §5.1
+    /// admin-path note). Run it with the local daemon stopped, or from an operator workstation.
+    Ping {
+        /// Peer node address, `host:port` (the peer's BUH_NODE_PORT).
+        addr: String,
+    },
 }
 
 #[tokio::main]
@@ -99,7 +114,7 @@ async fn main() -> anyhow::Result<()> {
             println!("swept {removed} expired envelope(s)");
         }
         Command::Ca(cmd) => run_ca(&cli.pki_dir, cmd)?,
-        Command::Peer(cmd) => run_peer(&cli.db_path, cmd).await?,
+        Command::Peer(cmd) => run_peer(&cli.db_path, &cli.pki_dir, cmd).await?,
     }
 
     Ok(())
@@ -137,7 +152,7 @@ fn run_ca(pki_dir: &str, cmd: CaCommand) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn run_peer(db_path: &str, cmd: PeerCommand) -> anyhow::Result<()> {
+async fn run_peer(db_path: &str, pki_dir: &str, cmd: PeerCommand) -> anyhow::Result<()> {
     let stack = stack(db_path).await?;
     stack.migrate().await?;
     let registry = TursoPeerTrust::new(stack.db.clone());
@@ -163,6 +178,31 @@ async fn run_peer(db_path: &str, cmd: PeerCommand) -> anyhow::Result<()> {
                 match p.note {
                     Some(note) => println!("{}  {}", p.ca_fingerprint, note),
                     None => println!("{}", p.ca_fingerprint),
+                }
+            }
+        }
+        PeerCommand::Ping { addr } => {
+            // Present this node's leaf and pin every CA currently in the trust registry.
+            let ca = RcgenNodeCa::load_or_init(pki_dir, default_sans(), NOMINAL_LEAF_TTL)?;
+            let trusted = registry.list().await?;
+            let trust =
+                TrustStore::from_fingerprints(trusted.into_iter().map(|p| p.ca_fingerprint));
+            let node_tls = NodeTls::new(Arc::new(ca), trust)?;
+
+            match probe_peer(&node_tls, &addr).await {
+                Ok(health) => {
+                    println!("reachable: {}", health.status_line);
+                    match health.ca_fingerprint {
+                        Some(fp) => println!("peer CA {fp} — mutual PQ-mTLS OK (both nodes trust)"),
+                        None => println!("peer did not advertise a CA fingerprint"),
+                    }
+                }
+                Err(e) => {
+                    println!("unreachable or refused: {e:#}");
+                    println!(
+                        "(mutual trust required: you must `peer trust <peer-ca-fp>` and the peer \
+                         must trust your CA — share `ca show`)"
+                    );
                 }
             }
         }

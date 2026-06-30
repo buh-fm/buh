@@ -14,6 +14,8 @@ path = "src/main.rs"
 [dependencies]
 buh-core.workspace = true
 buh-data.workspace = true
+# The CLI is the node's own admin tool; it links buh-api for the client-side PQ-mTLS probe.
+buh-api.workspace = true
 tokio.workspace = true
 clap.workspace = true
 anyhow.workspace = true

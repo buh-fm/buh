@@ -746,6 +746,7 @@ name = "buh-cli"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "buh-api",
  "buh-core",
  "buh-data",
  "clap",
