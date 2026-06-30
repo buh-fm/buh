@@ -131,7 +131,7 @@ impl Default for AppConfig {
             pki: PkiConfig {
                 enabled: false,
                 dir: "/var/lib/buh/pki".to_string(),
-                node_bind: "0.0.0.0:8443".to_string(),
+                node_bind: "0.0.0.0:31415".to_string(),
                 sans: vec!["localhost".to_string()],
                 leaf_ttl_hours: 48,
                 rotate_every_hours: 24,

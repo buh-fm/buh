@@ -41,7 +41,7 @@ concurrency:
 env:
   # --- infra truth ---
   NODE_HOST: slartibartfast.kosherinata.internal
-  NODE_PORT: "8443"        # BUH_NODE_PORT — the only edge port (PQ-mTLS ingress)
+  NODE_PORT: "31415"       # BUH_NODE_PORT — buh's staked port; the only edge port (PQ-mTLS ingress)
   ADMIN_PORT: "8081"       # loopback operator admin API (health probe target)
   NODE_SANS: '["slartibartfast.kosherinata.internal"]'   # TOML array for the leaf SANs
   MUSL_TARGET: x86_64-unknown-linux-musl
@@ -169,22 +169,22 @@ jobs:
             asset/firewalld/buh-node.xml \
             gitea_ci@"${NODE_HOST}":/etc/firewalld/services/buh-node.xml
 
-      - name: Apply SELinux + firewalld (idempotent)
+      - name: Apply SELinux contexts + firewalld (idempotent)
         run: |
           ssh gitea_ci@"${NODE_HOST}" '
             set -euo pipefail
             sudo /usr/sbin/restorecon -R /usr/local/bin/buh-api /usr/local/bin/buh-cli /etc/buh /var/lib/buh
-            # Label the PQ-mTLS ingress port (guarded so re-runs are no-ops; 8443
-            # is usually already http_port_t).
-            if ! sudo /usr/sbin/semanage port -l | grep -E "^http_port_t" | grep -qw '"${NODE_PORT}"'; then
-              sudo /usr/sbin/semanage port -a -t http_port_t -p tcp '"${NODE_PORT}"'
-            fi
-            # firewalld only learns a freshly-shipped custom service after reload.
+            # No SELinux port labeling: buh-api runs as unconfined_service_t (a plain
+            # systemd unit with no policy module), which may bind any port — so
+            # BUH_NODE_PORT needs no http_port_t entry. Keeping it out means a port
+            # change is purely repo-side: the firewalld rules below are keyed on the
+            # service NAME (buh-node), and the freshly-shipped buh-node.xml carries the
+            # new port, so a reload picks it up with no sudoers/infra-setup change.
             sudo /usr/bin/firewall-cmd --reload
             if ! sudo /usr/bin/firewall-cmd --query-service=buh-node; then
               sudo /usr/bin/firewall-cmd --add-service=buh-node --permanent
-              sudo /usr/bin/firewall-cmd --reload
-            fi'
+            fi
+            sudo /usr/bin/firewall-cmd --reload'
 
       - name: Restart buh-node
         run: |

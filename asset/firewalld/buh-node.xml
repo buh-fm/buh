@@ -5,5 +5,5 @@
   the relay/blob API served over X25519MLKEM768 mutual TLS, with peers pinned per-CA. The plain
   loopback health port (127.0.0.1:8080) is never opened. Forward this port from the edge
   (OPNsense/router) to the node host.</description>
-  <port protocol="tcp" port="8443"/>
+  <port protocol="tcp" port="31415"/>
 </service>

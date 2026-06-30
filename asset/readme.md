@@ -23,7 +23,7 @@ plane, no shared database, and no central PKI**:
   process* (`[relay].sweep_interval_seconds`), because Turso locks the datastore exclusively — a
   separate `buh-cli sweep` cannot open the DB while the daemon holds it.
 - `systemd/buh.sysusers.conf` — the unprivileged `buh` service account.
-- `firewalld/buh-node.xml` — opens **`BUH_NODE_PORT` (8443)**, the single PQ-mTLS ingress port.
+- `firewalld/buh-node.xml` — opens **`BUH_NODE_PORT` (31415)**, the single PQ-mTLS ingress port.
   The plain loopback health port is never exposed.
 - `deploy.sh` — installs the above on the local host, renders the config, has the node generate
   its CA, and prints the CA fingerprint to share with peers.

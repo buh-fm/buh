@@ -33,7 +33,7 @@ environments:
           pki:
             enabled: true
             dir: /var/lib/buh/pki        # CA key + cert; the node generates these on first start
-            node_bind: 0.0.0.0:8443      # BUH_NODE_PORT — the only port exposed at the edge
+            node_bind: 0.0.0.0:31415     # BUH_NODE_PORT — the only port exposed at the edge
             sans: [node1.example.com]    # hostnames/IPs the leaf answers to
             leaf_ttl_hours: 48
             rotate_every_hours: 24       # in-process leaf rotation (no step-ca, no .path units)

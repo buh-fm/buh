@@ -50,7 +50,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 : "${PKI_ENABLED:=true}"
 : "${PKI_DIR:=${STATE_DIR}/pki}"
-: "${NODE_BIND:=0.0.0.0:8443}"
+: "${NODE_BIND:=0.0.0.0:31415}"
 : "${PKI_SANS:=[\"localhost\"]}"
 : "${LEAF_TTL_HOURS:=48}"
 : "${ROTATE_EVERY_HOURS:=24}"
