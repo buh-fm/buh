@@ -750,6 +750,7 @@ dependencies = [
  "buh-core",
  "buh-data",
  "clap",
+ "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
