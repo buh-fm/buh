@@ -48,7 +48,7 @@ env:
   NODE_HOST: slartibartfast.kosherinata.internal
   NODE_PORT: "31415"       # BUH_NODE_PORT — buh's staked port; the only edge port (PQ-mTLS ingress)
   ADMIN_PORT: "8081"       # loopback operator admin API (health probe target)
-  NODE_SANS: '["slartibartfast.kosherinata.internal"]'   # TOML array for the leaf SANs
+  NODE_SANS: '["testnet.buh.fm"]'   # TOML array of leaf SANs — this node's public FQDN (see doc/testnet.md)
   MUSL_TARGET: x86_64-unknown-linux-musl
   DEPLOY_KEY: |
     ${{ secrets.RSYNC_SSH_KEY }}
