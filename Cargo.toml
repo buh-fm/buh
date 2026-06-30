@@ -1,0 +1,55 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "AGPL-3.0-only"
+authors = ["Rob Thijssen <rob@example>"]
+
+[workspace.dependencies]
+# Internal crates
+buh-entities = { path = "crates/buh-entities", version = "=0.1.0" }
+buh-core = { path = "crates/buh-core", version = "=0.1.0" }
+buh-data = { path = "crates/buh-data", version = "=0.1.0" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Web
+axum = { version = "0.8", features = ["macros"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "limit", "cors"] }
+
+# Per-node datastore: Turso Database (embedded, pure-Rust SQLite rewrite).
+# Not sqlx — the turso crate is the native async API. All SQL is centralised in buh-data.
+turso = "0.4"
+
+# Config
+figment = { version = "0.10", features = ["toml", "env"] }
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# Errors / logging
+thiserror = "2"
+anyhow = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+
+# Misc
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+hex = "0.4"
+base64 = "0.22"
+bytes = "1"
+tempfile = "3"
+rand = "0.8"

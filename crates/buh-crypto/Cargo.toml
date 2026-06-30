@@ -1,0 +1,19 @@
+[package]
+name = "buh-crypto"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "buh client cryptography core (PQ identity, PQXDH, Double Ratchet, wire codec). Compiles to WASM for the web client."
+
+[lib]
+# rlib for native consumers (tests, future Rust/Tauri client); cdylib for the wasm-pack build.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Enables the wasm-bindgen FFI surface (Phase 4). Off by default so the core stays
+# `#![forbid(unsafe_code)]` and dependency-clean for native builds and tests.
+wasm = []
+
+[dependencies]

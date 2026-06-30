@@ -1,0 +1,14 @@
+[package]
+name = "buh-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "buh business logic and port traits (no direct I/O)."
+
+[dependencies]
+buh-entities.workspace = true
+async-trait.workspace = true
+chrono.workspace = true
+thiserror.workspace = true
