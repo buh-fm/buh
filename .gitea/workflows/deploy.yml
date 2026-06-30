@@ -44,11 +44,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # --- infra truth ---
-  NODE_HOST: slartibartfast.kosherinata.internal
+  # --- infra truth shared by every node (per-node host/SANs live in the deploy matrix) ---
   NODE_PORT: "31415"       # BUH_NODE_PORT — buh's staked port; the only edge port (PQ-mTLS ingress)
   ADMIN_PORT: "8081"       # loopback operator admin API (health probe target)
-  NODE_SANS: '["testnet.buh.fm"]'   # TOML array of leaf SANs — this node's public FQDN (see doc/testnet.md)
   MUSL_TARGET: x86_64-unknown-linux-musl
   DEPLOY_KEY: |
     ${{ secrets.RSYNC_SSH_KEY }}
@@ -87,9 +85,24 @@ jobs:
         with: { name: buh-binaries, path: artifacts, retention-days: 1 }
 
   deploy-node:
-    name: Deploy buh node to slartibartfast
+    name: "Deploy buh node: ${{ matrix.sans }} @ ${{ matrix.host }}"
     needs: build
     runs-on: fedora-44
+    # One deploy per testnet node. Each runs the same binary with its own host +
+    # leaf SANs; the nodes are independent CAs that peer by mutual fingerprint
+    # trust (doc/testnet.md). fail-fast: false so one unreachable/unprovisioned
+    # host doesn't abort the others.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: slartibartfast.kosherinata.internal
+            sans: '["testnet.buh.fm"]'
+          - host: oci.hanzalova.internal
+            sans: '["t2.buh.fm"]'
+    env:
+      NODE_HOST: ${{ matrix.host }}
+      NODE_SANS: ${{ matrix.sans }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v3

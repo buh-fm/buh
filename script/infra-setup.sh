@@ -23,8 +23,14 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_path="$(cd "${script_dir}/.." && pwd)"
 
-# host -> sudoers drop-in (the source of infra truth, mirroring the workflow env).
-node_host="slartibartfast.kosherinata.internal"
+# Testnet node hosts (mirrors the deploy matrix in .gitea/workflows/deploy.yml).
+# The same host-agnostic sudoers drop-in is installed on each — it pins commands
+# and paths, not hostnames. Run this from a machine that can reach the host
+# (different nodes may live on different meshes).
+node_hosts=(
+    slartibartfast.kosherinata.internal   # testnet.buh.fm
+    oci.hanzalova.internal                # t2.buh.fm
+)
 node_sudoers="${repo_path}/asset/sudoers.d/node-host.conf"
 
 pubkey="${HOME}/.ssh/id_gitea_ci.pub"
@@ -96,9 +102,14 @@ setup_host() {
         || { echo "  ${host}: setup incomplete"; return 1; }
 }
 
-setup_host "${node_host}" "${node_sudoers}" buh_node_gitea_ci
+rc=0
+for h in "${node_hosts[@]}"; do
+    setup_host "${h}" "${node_sudoers}" buh_node_gitea_ci || rc=1
+done
 
 echo "==> done."
 echo "    Gitea repo secrets to set (Settings -> Actions -> Secrets):"
 echo "        RSYNC_SSH_KEY   private key matching ${pubkey}"
 echo "    (buh has no app secrets — the node mints its own CA and uses an embedded datastore.)"
+
+exit "${rc}"
