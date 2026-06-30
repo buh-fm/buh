@@ -15,4 +15,6 @@ pub mod ports;
 
 pub use context::{CoreConfig, Ctx};
 pub use error::{CoreError, CoreResult};
-pub use ports::{BlobStore, MailboxRepo, SettlementBackend};
+pub use ports::{
+    BlobStore, MailboxRepo, NodeLeaf, NodePki, PeerTrustRegistry, SettlementBackend, TrustedPeer,
+};

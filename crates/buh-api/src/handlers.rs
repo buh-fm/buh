@@ -22,9 +22,15 @@ use buh_entities::{
 use crate::error::ApiError;
 use crate::state::AppState;
 
-/// Liveness probe.
-pub async fn health() -> Json<Value> {
-    Json(json!({ "status": "ok" }))
+/// Liveness probe. On a PQ-mTLS node it also advertises the node's CA fingerprint — the public
+/// value clients pin (`doc/design.md` §5.1). Exposing it is safe (it is the node's public
+/// identity) and lets a client confirm the fingerprint carried in an invite matches the node it
+/// is actually talking to.
+pub async fn health(State(state): State<AppState>) -> Json<Value> {
+    match state.ctx.pki.as_ref() {
+        Some(pki) => Json(json!({ "status": "ok", "ca_fingerprint": pki.ca_fingerprint() })),
+        None => Json(json!({ "status": "ok" })),
+    }
 }
 
 /// `POST /v1/queue/{queue_id}/envelopes` — push a sealed envelope.

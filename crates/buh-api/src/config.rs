@@ -21,6 +21,30 @@ pub struct AppConfig {
     pub relay: RelayConfig,
     /// Blob-role configuration (disabled by default — a node opts into the blob role).
     pub blob: BlobConfig,
+    /// PQ-mTLS ingress + per-node CA (disabled by default; `bind` stays plain loopback for dev).
+    pub pki: PkiConfig,
+}
+
+/// PQ-mTLS / per-node-CA configuration (`doc/design.md` §5.1, the decentralised-CA deviation).
+///
+/// When `enabled`, the node generates (on first start) and self-serves its own CA, binds a
+/// PQ-mTLS listener on `node_bind` (the standardised `BUH_NODE_PORT`, forwarded from the edge),
+/// and auto-rotates its leaf in process. When disabled, the node serves plain HTTP on `bind` —
+/// the loopback mode the dev web demo and tests use, with no certificates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PkiConfig {
+    /// Whether this node serves PQ-mTLS (and thus is its own CA). Off → plain loopback on `bind`.
+    pub enabled: bool,
+    /// Directory holding the persisted CA key + cert (`/var/lib/buh/pki` in prod).
+    pub dir: String,
+    /// Address for the PQ-mTLS ingress listener (the standardised `BUH_NODE_PORT`).
+    pub node_bind: String,
+    /// Subject alternative names stamped on issued leaves (hostnames/IPs the node answers to).
+    pub sans: Vec<String>,
+    /// Validity window of each issued leaf, in hours.
+    pub leaf_ttl_hours: u64,
+    /// How often the in-process timer issues a fresh leaf, in hours (well inside `leaf_ttl_hours`).
+    pub rotate_every_hours: u64,
 }
 
 /// Blob-role configuration. A node runs the blob role only when `enabled` is set; it then
@@ -83,6 +107,14 @@ impl Default for AppConfig {
                 s3_region: "us-east-1".to_string(),
                 s3_access_key: String::new(),
                 s3_secret_key: String::new(),
+            },
+            pki: PkiConfig {
+                enabled: false,
+                dir: "/var/lib/buh/pki".to_string(),
+                node_bind: "0.0.0.0:8443".to_string(),
+                sans: vec!["localhost".to_string()],
+                leaf_ttl_hours: 48,
+                rotate_every_hours: 24,
             },
         }
     }

@@ -56,3 +56,47 @@ export async function health(): Promise<boolean> {
     return false;
   }
 }
+
+// --- Per-node CA pinning (Phase 6, doc/design.md §5.1) -----------------------------------------
+//
+// Trust is per-CA: a verified invite carries the queue node's CA fingerprint, and the client
+// pins it. On a NATIVE node↔node client this pin is enforced *cryptographically* at the TLS
+// layer (the Rust `PinnedServerCertVerifier` refuses any node whose CA fingerprint is not the
+// pinned one). Browsers cannot pin a custom CA on `fetch`, so in this web demo the same pinned
+// value is checked at the application layer against the fingerprint the node advertises on
+// `/v1/health` — a best-effort consistency check, not a substitute for TLS-layer pinning.
+
+let pinnedCa: string | null = null;
+
+/// Pin the node's expected CA fingerprint (lowercase hex), as carried in a verified invite.
+export function pinCa(caFingerprintHex: string): void {
+  pinnedCa = caFingerprintHex.toLowerCase();
+}
+
+/// The CA fingerprint the node advertises on `/v1/health` (hex), or `null` if it serves plain
+/// HTTP (the dev loopback mode, where there is no CA and nothing to pin).
+export async function nodeCaFingerprint(): Promise<string | null> {
+  try {
+    const res = await fetch("/v1/health");
+    if (!res.ok) return null;
+    const body = await res.json();
+    return typeof body.ca_fingerprint === "string" ? body.ca_fingerprint.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/// The relay client's TLS trust decision, made explicit. Returns `true` when the pin is verified
+/// against the node's advertised CA fingerprint; `false` when there is no real pin or the node
+/// serves plain HTTP (pin inert in dev); throws on a genuine mismatch (a different node's CA).
+export async function verifyPinnedCa(): Promise<boolean> {
+  if (!pinnedCa || /^0*$/.test(pinnedCa)) return false; // unset/zero-filled: no pin to enforce
+  const advertised = await nodeCaFingerprint();
+  if (advertised === null) return false; // plain dev node: nothing to compare against
+  if (advertised !== pinnedCa) {
+    throw new Error(
+      `CA pin mismatch: invite pins ${pinnedCa.slice(0, 16)}…, node serves ${advertised.slice(0, 16)}…`,
+    );
+  }
+  return true;
+}

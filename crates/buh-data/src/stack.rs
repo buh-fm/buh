@@ -2,6 +2,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use turso::Builder;
 
@@ -10,6 +11,8 @@ use buh_core::context::{CoreConfig, Ctx};
 
 use crate::error::repo;
 use crate::fs_blob::FsBlobStore;
+use crate::node_ca::RcgenNodeCa;
+use crate::peer_trust::TursoPeerTrust;
 use crate::turso_mailbox::TursoMailboxRepo;
 
 /// The assembled data stack: the database handle (for migrations) and a ready-to-use [`Ctx`].
@@ -30,6 +33,8 @@ impl DataStack {
         let ctx = Ctx {
             mailbox,
             blob: None,
+            pki: None,
+            peer_trust: None,
             config: core_config,
         };
 
@@ -49,6 +54,21 @@ impl DataStack {
     pub fn with_s3_blob(mut self, settings: &crate::s3_blob::S3Settings) -> Self {
         self.ctx.blob = Some(Arc::new(crate::s3_blob::S3BlobStore::new(settings)));
         self
+    }
+
+    /// Enable PQ-mTLS: load (or generate) this node's CA under `pki_dir`, issuing leaves valid
+    /// for `leaf_ttl` and stamped with `sans`, and attach the Turso-backed peer-trust registry.
+    /// Both ports are set together — a node serving PQ-mTLS also needs a trust registry.
+    pub fn with_node_pki(
+        mut self,
+        pki_dir: impl Into<PathBuf>,
+        sans: Vec<String>,
+        leaf_ttl: Duration,
+    ) -> Result<Self, CoreError> {
+        let pki = RcgenNodeCa::load_or_init(pki_dir, sans, leaf_ttl)?;
+        self.ctx.pki = Some(Arc::new(pki));
+        self.ctx.peer_trust = Some(Arc::new(TursoPeerTrust::new(self.db.clone())));
+        Ok(self)
     }
 
     /// Run the embedded migrations.

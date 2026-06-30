@@ -39,6 +39,17 @@ aws-config = { version = "1", default-features = false, features = ["behavior-ve
 aws-sdk-s3 = { version = "1", default-features = false, features = ["rt-tokio"] }
 aws-credential-types = "1"
 
+# Node transport: decentralised PQ-mTLS (X25519MLKEM768) under a per-node CA. The node links
+# these; buh-crypto (the client crypto core) must NOT — they are unrelated trust domains.
+rustls = "0.23"
+rustls-post-quantum = "0.2"
+tokio-rustls = "0.26"
+rcgen = "0.13"
+# `verify` enables X509Certificate::verify_signature — the per-CA chain check in the TLS verifiers.
+x509-parser = { version = "0.16", features = ["verify"] }
+# rcgen leaf validity windows are `time::OffsetDateTime`; we compute them from the wall clock.
+time = "0.3"
+
 # Config
 figment = { version = "0.10", features = ["toml", "env"] }
 

@@ -16,7 +16,7 @@ import {
   parseInvite,
   publishablePrekeyBundle,
 } from "./crypto";
-import { randomQueueId, toBase64, toHex } from "./bytes";
+import { fromHex, isAllZero, randomQueueId, toBase64, toHex } from "./bytes";
 import type { KeyStore } from "./keystore";
 import * as relay from "./relay";
 
@@ -37,6 +37,10 @@ export interface DemoResult {
   aliceDecrypted: string;
   bobDecrypted: string;
   relayView: RelayEnvelopeView[];
+  /// The queue node's CA fingerprint carried in the invite (hex), or "" when unpinned (dev).
+  caFingerprint: string;
+  /// Whether the relay client verified the pinned CA against the node it talked to.
+  caPinVerified: boolean;
 }
 
 const fingerprint = (idPub: Uint8Array) => toHex(idPub).slice(0, 16);
@@ -67,7 +71,16 @@ export async function runDemo(
   await store.put("alice/queue", aliceQueue);
 
   const nonce = crypto.getRandomValues(new Uint8Array(16));
-  const caFingerprint = new Uint8Array(32); // real per-node CA pinning arrives in Phase 6
+  // The invite pins the queue node's CA. When the node serves PQ-mTLS it advertises its real CA
+  // fingerprint on /v1/health; in plain dev/loopback mode there is no CA, so the field stays
+  // zero (an explicit "unpinned" marker the client treats as inert).
+  const advertisedCa = await relay.nodeCaFingerprint();
+  const caFingerprint = advertisedCa ? fromHex(advertisedCa) : new Uint8Array(32);
+  log(
+    advertisedCa
+      ? `Alice: pinning node CA ${advertisedCa.slice(0, 16)}… in the invite.`
+      : "Alice: node serves plain HTTP (dev) — invite carries an unpinned CA placeholder.",
+  );
   const inviteUri = createInvite(
     aliceId,
     aliceQueue,
@@ -82,6 +95,20 @@ export async function runDemo(
   // --- Bob receives the invite out-of-band, verifies it, and opens a session. ---
   log("Bob: parsing + verifying invite…");
   const parsed = parseInvite(inviteUri); // throws if the signature/bundle don't verify
+
+  // Bob makes the relay client's TLS trust decision: pin the CA fingerprint the verified invite
+  // carries, then confirm the node he is about to talk to presents it. (Native clients enforce
+  // this at the TLS layer; the browser checks the node's advertised fingerprint — see relay.ts.)
+  const caFingerprintHex = toHex(parsed.ca_fingerprint);
+  let caPinVerified = false;
+  if (!isAllZero(parsed.ca_fingerprint)) {
+    relay.pinCa(caFingerprintHex);
+    caPinVerified = await relay.verifyPinnedCa(); // throws on a genuine CA mismatch
+    log(`Bob: CA pin ${caPinVerified ? "verified" : "inert (dev node)"} for ${caFingerprintHex.slice(0, 16)}…`);
+  } else {
+    log("Bob: invite carries no CA pin (dev node) — skipping TLS trust check.");
+  }
+
   const bobId = generateIdentity();
   await store.put("bob/identity", bobId);
   const bobQueue = randomQueueId();
@@ -142,5 +169,7 @@ export async function runDemo(
     aliceDecrypted,
     bobDecrypted,
     relayView,
+    caFingerprint: isAllZero(parsed.ca_fingerprint) ? "" : caFingerprintHex,
+    caPinVerified,
   };
 }

@@ -124,6 +124,8 @@ mod tests {
         Ctx {
             mailbox: Arc::new(NoMailbox),
             blob,
+            pki: None,
+            peer_trust: None,
             config: CoreConfig::default(),
         }
     }

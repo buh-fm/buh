@@ -106,6 +106,25 @@ export default function App() {
             </tbody>
           </table>
 
+          <h2>Node CA pin (PQ-mTLS)</h2>
+          <p style={{ color: "#555", fontSize: "0.9rem" }}>
+            {result.caFingerprint ? (
+              <>
+                The invite pins the queue node's CA{" "}
+                <span style={mono} data-testid="ca-fingerprint">
+                  {result.caFingerprint.slice(0, 32)}…
+                </span>{" "}
+                — {result.caPinVerified ? "verified against the node" : "advertised but unverified"}.
+                Native node↔node clients enforce this pin at the TLS layer (X25519MLKEM768).
+              </>
+            ) : (
+              <>
+                The dev node serves plain HTTP (loopback), so the invite carries no CA pin. With{" "}
+                <code>[pki] enabled</code> the node is its own CA and the invite pins its fingerprint.
+              </>
+            )}
+          </p>
+
           <h2>Invite</h2>
           <p style={{ ...mono, fontSize: "0.75rem", wordBreak: "break-all", color: "#666" }}>
             {result.inviteUri.slice(0, 120)}…

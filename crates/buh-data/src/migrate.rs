@@ -13,7 +13,10 @@ use buh_core::CoreError;
 use crate::error::repo;
 
 /// The ordered set of embedded migrations: `(version, sql)`.
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../migrations/0001_init.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../migrations/0001_init.sql")),
+    (2, include_str!("../migrations/0002_peer_trust.sql")),
+];
 
 /// Apply any migrations not yet recorded in `schema_version`, in order.
 pub async fn run(conn: &Connection) -> Result<(), CoreError> {

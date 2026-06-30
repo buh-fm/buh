@@ -7,15 +7,21 @@
 #![forbid(unsafe_code)]
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto::Builder as ConnBuilder;
+use hyper_util::service::TowerToHyperService;
 use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
 use tracing_subscriber::EnvFilter;
 
-use buh_api::config::{AppConfig, BlobConfig};
+use buh_api::config::{AppConfig, BlobConfig, PkiConfig};
 use buh_api::router::router;
 use buh_api::state::AppState;
+use buh_api::tls::{NodeTls, TrustStore};
 use buh_data::DataStack;
 
 /// Command-line arguments.
@@ -46,19 +52,129 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!(backend = %config.blob.backend, "blob role enabled");
     }
 
+    // PQ-mTLS opt-in: a node serving the decentralised per-node CA needs its PKI + trust ports.
+    if config.pki.enabled {
+        stack = stack.with_node_pki(
+            &config.pki.dir,
+            config.pki.sans.clone(),
+            Duration::from_secs(config.pki.leaf_ttl_hours * 3600),
+        )?;
+    }
+
     let state = AppState {
         ctx: stack.ctx.clone(),
         max_wait: Duration::from_secs(config.relay.max_wait_seconds),
     };
+    let app = router(state);
 
-    let listener = TcpListener::bind(&config.bind).await?;
-    tracing::info!(bind = %config.bind, "buh-api listening");
+    if config.pki.enabled {
+        serve_pqmtls(app, &stack, &config.pki).await
+    } else {
+        serve_plain(app, &config.bind).await
+    }
+}
 
-    axum::serve(listener, router(state))
+/// Plain-HTTP loopback ingress: the dev/web-demo mode (and what the integration tests exercise
+/// through the router directly). No certificates.
+async fn serve_plain(app: axum::Router, bind: &str) -> anyhow::Result<()> {
+    let listener = TcpListener::bind(bind).await?;
+    tracing::warn!(bind = %bind, "buh-api listening (PLAIN HTTP — dev/loopback mode, PQ-mTLS off)");
+    axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
-
     Ok(())
+}
+
+/// PQ-mTLS ingress: serve the router over X25519MLKEM768 mutual TLS, pinning peer CAs from the
+/// trust registry, with the leaf auto-rotating on an in-process timer.
+async fn serve_pqmtls(app: axum::Router, stack: &DataStack, pki: &PkiConfig) -> anyhow::Result<()> {
+    let node_pki = stack
+        .ctx
+        .pki
+        .clone()
+        .expect("pki port set when pki.enabled");
+    let registry = stack
+        .ctx
+        .peer_trust
+        .clone()
+        .expect("peer_trust port set when pki.enabled");
+
+    // Load the trusted peer-CA set into the live snapshot the verifiers read.
+    let trust = TrustStore::new();
+    refresh_trust(&trust, registry.as_ref()).await;
+
+    let node_tls = NodeTls::new(node_pki.clone(), trust.clone())?;
+    tracing::info!(
+        ca_fingerprint = %node_pki.ca_fingerprint(),
+        node_bind = %pki.node_bind,
+        "PQ-mTLS node: share this CA fingerprint with peers/clients to be trusted"
+    );
+
+    // In-process leaf rotation + periodic trust refresh.
+    {
+        let node_tls = node_tls.clone();
+        let trust = trust.clone();
+        let registry = registry.clone();
+        let every = Duration::from_secs(pki.rotate_every_hours.max(1) * 3600);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(every);
+            tick.tick().await; // consume the immediate first tick
+            loop {
+                tick.tick().await;
+                match node_tls.rotate_leaf() {
+                    Ok(exp) => tracing::info!(not_after_ms = exp, "rotated PQ-mTLS leaf"),
+                    Err(e) => tracing::error!(error = %e, "leaf rotation failed"),
+                }
+                refresh_trust(&trust, registry.as_ref()).await;
+            }
+        });
+    }
+
+    let acceptor = TlsAcceptor::from(Arc::new(node_tls.server_config()?));
+    let listener = TcpListener::bind(&pki.node_bind).await?;
+    tracing::info!(node_bind = %pki.node_bind, "buh-api listening (PQ-mTLS)");
+
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
+    loop {
+        tokio::select! {
+            () = &mut shutdown => {
+                tracing::info!("shutdown signal received, no longer accepting connections");
+                break;
+            }
+            accepted = listener.accept() => {
+                let (stream, peer) = match accepted {
+                    Ok(pair) => pair,
+                    Err(e) => { tracing::warn!(error = %e, "accept failed"); continue; }
+                };
+                let acceptor = acceptor.clone();
+                let svc = TowerToHyperService::new(app.clone());
+                tokio::spawn(async move {
+                    match acceptor.accept(stream).await {
+                        Ok(tls) => {
+                            let io = TokioIo::new(tls);
+                            if let Err(e) =
+                                ConnBuilder::new(TokioExecutor::new()).serve_connection(io, svc).await
+                            {
+                                tracing::debug!(error = %e, "connection closed with error");
+                            }
+                        }
+                        // A refused handshake (unpinned/distrusted peer) is normal, not an error.
+                        Err(e) => tracing::debug!(error = %e, peer = %peer, "TLS handshake refused"),
+                    }
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Replace the live trust snapshot with the current registry contents.
+async fn refresh_trust(trust: &TrustStore, registry: &dyn buh_core::PeerTrustRegistry) {
+    match registry.list().await {
+        Ok(peers) => trust.replace(peers.into_iter().map(|p| p.ca_fingerprint)),
+        Err(e) => tracing::error!(error = %e, "failed to load peer trust registry"),
+    }
 }
 
 /// Attach the configured blob backend to the data stack, enabling the node's blob role. The

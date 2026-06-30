@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use crate::ports::{BlobStore, MailboxRepo};
+use crate::ports::{BlobStore, MailboxRepo, NodePki, PeerTrustRegistry};
 
 /// Non-secret tuning knobs for relay logic.
 #[derive(Debug, Clone)]
@@ -44,6 +44,10 @@ pub struct Ctx {
     pub mailbox: Arc<dyn MailboxRepo>,
     /// Opaque media object store — `Some` only on nodes running the blob role.
     pub blob: Option<Arc<dyn BlobStore>>,
+    /// This node's own PKI (CA + leaf issuance) — `Some` once PQ-mTLS ingress is configured.
+    pub pki: Option<Arc<dyn NodePki>>,
+    /// Peer-CA trust registry — `Some` alongside [`Ctx::pki`] on a PQ-mTLS node.
+    pub peer_trust: Option<Arc<dyn PeerTrustRegistry>>,
     /// Tuning knobs.
     pub config: CoreConfig,
 }

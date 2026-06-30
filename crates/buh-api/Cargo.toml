@@ -32,6 +32,17 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 
+# PQ-mTLS ingress (Phase 6). aws-lc-rs (pulled by rustls-post-quantum) supplies X25519MLKEM768.
+rustls.workspace = true
+rustls-post-quantum.workspace = true
+tokio-rustls.workspace = true
+x509-parser.workspace = true
+sha2.workspace = true
+hex.workspace = true
+# Serve the axum router over a tokio-rustls acceptor (axum::serve cannot take a TLS listener).
+hyper = { version = "1", features = ["http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "service"] }
+
 [dev-dependencies]
 tempfile.workspace = true
 base64.workspace = true

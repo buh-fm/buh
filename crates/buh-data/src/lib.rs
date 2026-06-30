@@ -10,6 +10,8 @@
 mod error;
 mod fs_blob;
 mod migrate;
+mod node_ca;
+mod peer_trust;
 mod stack;
 mod stub_settlement;
 mod turso_mailbox;
@@ -18,6 +20,8 @@ mod turso_mailbox;
 mod s3_blob;
 
 pub use fs_blob::FsBlobStore;
+pub use node_ca::{RcgenNodeCa, fingerprint};
+pub use peer_trust::TursoPeerTrust;
 pub use stack::DataStack;
 pub use stub_settlement::StubSettlement;
 pub use turso_mailbox::TursoMailboxRepo;

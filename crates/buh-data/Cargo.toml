@@ -21,6 +21,14 @@ chrono.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 
+# Per-node PQ-mTLS CA (the decentralised-CA deviation): generate the node CA and issue
+# short-lived leaves. rcgen signs with a classical algorithm — the post-quantum strength is in
+# the TLS key exchange (X25519MLKEM768), which is what harvest-now-decrypt-later threatens.
+rcgen = { workspace = true, features = ["pem"] }
+time.workspace = true
+sha2.workspace = true
+hex.workspace = true
+
 # Blob backends.
 aws-config = { workspace = true, optional = true }
 aws-sdk-s3 = { workspace = true, optional = true }
@@ -29,3 +37,4 @@ aws-credential-types = { workspace = true, optional = true }
 [dev-dependencies]
 tempfile.workspace = true
 serde_json.workspace = true
+x509-parser.workspace = true
