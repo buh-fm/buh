@@ -1,75 +1,117 @@
-import { useEffect, useState } from "react";
-import {
-  aeadSelfTest,
-  echo,
-  identitySelfTest,
-  version,
-  wireSelfTest,
-} from "./lib/crypto";
+import { useEffect, useRef, useState } from "react";
+import { version } from "./lib/crypto";
+import { type DemoResult, runDemo } from "./lib/demo";
+import { IndexedDbKeyStore } from "./lib/keystore";
+import { health } from "./lib/relay";
 
-interface Check {
-  name: string;
-  pass: boolean;
-  detail: string;
-}
-
-// Proves the Rust↔WASM boundary before any real session code depends on it: a Uint8Array
-// must survive the round trip unchanged, and the crypto core's own KATs (wire codec,
-// XChaCha20-Poly1305, ML-DSA-65 over the wasm_js getrandom backend) must pass in the browser.
-function runChecks(): Check[] {
-  const input = new Uint8Array([0xb0, 0x01, 0x00, 0xff, 0x42]);
-  const output = echo(input);
-  const roundTripped =
-    output.length === input.length && output.every((b, i) => b === input[i]);
-
-  return [
-    {
-      name: "Uint8Array round-trips Rust↔WASM",
-      pass: roundTripped,
-      detail: `${[...input]} → ${[...output]}`,
-    },
-    { name: "wire TLV codec KAT", pass: wireSelfTest(), detail: "encode/decode + PQ gate" },
-    { name: "XChaCha20-Poly1305 KAT", pass: aeadSelfTest(), detail: "draft-arciszewski A.1" },
-    {
-      name: "ML-DSA-65 keygen/sign/verify",
-      pass: identitySelfTest(),
-      detail: "hedged signing, wasm_js RNG",
-    },
-  ];
-}
+const mono: React.CSSProperties = { fontFamily: "ui-monospace, monospace" };
 
 export default function App() {
-  const [checks, setChecks] = useState<Check[] | null>(null);
+  const [relayUp, setRelayUp] = useState<boolean | null>(null);
+  const [log, setLog] = useState<string[]>([]);
+  const [result, setResult] = useState<DemoResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const store = useRef<IndexedDbKeyStore | null>(null);
 
   useEffect(() => {
-    try {
-      setChecks(runChecks());
-    } catch (e) {
-      setError(String(e));
-    }
+    health().then(setRelayUp);
   }, []);
 
-  const allPass = checks?.every((c) => c.pass) ?? false;
+  async function run() {
+    setRunning(true);
+    setError(null);
+    setResult(null);
+    setLog([]);
+    try {
+      if (!store.current) {
+        store.current = await IndexedDbKeyStore.open("buh-demo-passphrase");
+      }
+      const append = (line: string) => setLog((l) => [...l, line]);
+      setResult(await runDemo(store.current, append));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setRunning(false);
+    }
+  }
 
   return (
-    <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 640, margin: "3rem auto" }}>
-      <h1>buh crypto boundary</h1>
+    <main style={{ fontFamily: "system-ui, sans-serif", maxWidth: 760, margin: "2.5rem auto", padding: "0 1rem" }}>
+      <h1>buh — end-to-end through a blind relay</h1>
       <p>
-        buh-crypto v{checks ? version() : "…"} —{" "}
-        <strong style={{ color: allPass ? "green" : error ? "crimson" : "gray" }}>
-          {error ? "ERROR" : allPass ? "all checks pass" : "running…"}
+        buh-crypto v{version()} · relay{" "}
+        <strong style={{ color: relayUp ? "green" : relayUp === false ? "crimson" : "gray" }}>
+          {relayUp == null ? "checking…" : relayUp ? "reachable" : "unreachable (start buh-api)"}
         </strong>
       </p>
-      {error && <pre style={{ color: "crimson" }}>{error}</pre>}
-      <ul style={{ listStyle: "none", padding: 0 }}>
-        {checks?.map((c) => (
-          <li key={c.name} data-testid="check" data-pass={c.pass} style={{ padding: "0.35rem 0" }}>
-            <span style={{ color: c.pass ? "green" : "crimson" }}>{c.pass ? "✓" : "✗"}</span>{" "}
-            {c.name} <small style={{ color: "#666" }}>— {c.detail}</small>
-          </li>
-        ))}
-      </ul>
+      <p style={{ color: "#555" }}>
+        One page plays Alice and Bob. Alice publishes a signed invite; Bob verifies it, runs the
+        PQXDH handshake (X25519 + ML-KEM-768) and Double Ratchet, and a sealed text message
+        travels each way <strong>through the real relay</strong>. Every secret is persisted via an
+        Argon2id-sealed IndexedDB key store.
+      </p>
+
+      <button type="button" onClick={run} disabled={running || relayUp === false} style={{ padding: "0.5rem 1rem", fontSize: "1rem" }}>
+        {running ? "running…" : "Run end-to-end demo"}
+      </button>
+
+      {error && (
+        <pre style={{ color: "crimson", whiteSpace: "pre-wrap", marginTop: "1rem" }}>{error}</pre>
+      )}
+
+      {log.length > 0 && (
+        <ol style={{ color: "#444", fontSize: "0.9rem", marginTop: "1.25rem" }}>
+          {log.map((line, i) => (
+            <li key={`${i}-${line}`}>{line}</li>
+          ))}
+        </ol>
+      )}
+
+      {result && (
+        <section style={{ marginTop: "1.5rem" }}>
+          <h2>Decrypted at each endpoint</h2>
+          <p>
+            Alice ({result.aliceFingerprint}…) read:{" "}
+            <strong data-testid="alice-read">“{result.aliceDecrypted}”</strong>
+          </p>
+          <p>
+            Bob ({result.bobFingerprint}…) read:{" "}
+            <strong data-testid="bob-read">“{result.bobDecrypted}”</strong>
+          </p>
+
+          <h2>What the relay stored (it is blind)</h2>
+          <p style={{ color: "#555", fontSize: "0.9rem" }}>
+            The relay holds only an opaque queue id, an envelope id, and ciphertext — no identity,
+            no sender, nothing linking the two queues.
+          </p>
+          <table style={{ ...mono, fontSize: "0.8rem", borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr style={{ textAlign: "left", borderBottom: "1px solid #ccc" }}>
+                <th>queue…</th>
+                <th>envelope id</th>
+                <th>payload (sealed)</th>
+                <th>bytes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.relayView.map((e) => (
+                <tr key={e.envelopeId} style={{ borderBottom: "1px solid #eee" }}>
+                  <td>{e.queue}…</td>
+                  <td>{e.envelopeId.slice(0, 8)}…</td>
+                  <td>{e.payloadPreview}</td>
+                  <td>{e.bytes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <h2>Invite</h2>
+          <p style={{ ...mono, fontSize: "0.75rem", wordBreak: "break-all", color: "#666" }}>
+            {result.inviteUri.slice(0, 120)}…
+          </p>
+        </section>
+      )}
     </main>
   );
 }
