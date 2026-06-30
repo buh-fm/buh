@@ -55,6 +55,22 @@ pub async fn serve_plain(
     Ok(())
 }
 
+/// Loopback operator admin API. Plain HTTP, bound to loopback only (no auth, no TLS) — it manages
+/// peer trust on a running node, which Turso's exclusive lock otherwise makes impossible.
+pub async fn serve_admin(
+    app: axum::Router,
+    listener: TcpListener,
+    shutdown: impl Future<Output = ()> + Send + 'static,
+) -> anyhow::Result<()> {
+    if let Ok(addr) = listener.local_addr() {
+        tracing::info!(admin_bind = %addr, "buh-api admin API listening (loopback)");
+    }
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await?;
+    Ok(())
+}
+
 /// PQ-mTLS ingress: serve the router over X25519MLKEM768 mutual TLS, pinning peer CAs from the
 /// trust registry, with the leaf auto-rotating on an in-process timer.
 ///

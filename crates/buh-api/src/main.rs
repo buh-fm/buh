@@ -13,12 +13,15 @@ use clap::Parser;
 use tokio::net::TcpListener;
 use tracing_subscriber::EnvFilter;
 
-use buh_api::config::{AppConfig, BlobConfig};
+use buh_api::admin::{AdminState, admin_router};
+use buh_api::config::{AdminConfig, AppConfig, BlobConfig};
 use buh_api::router::router;
-use buh_api::serve::{serve_plain, serve_pqmtls, spawn_sweeper};
+use buh_api::serve::{serve_admin, serve_plain, serve_pqmtls, spawn_sweeper};
 use buh_api::state::AppState;
 use buh_api::tls::{NodeTls, TrustStore};
+use buh_core::{NodePki, PeerTrustRegistry};
 use buh_data::DataStack;
+use std::sync::Arc;
 
 /// Command-line arguments.
 #[derive(Debug, Parser)]
@@ -82,6 +85,19 @@ async fn main() -> anyhow::Result<()> {
             node_bind = %config.pki.node_bind,
             "PQ-mTLS node: share this CA fingerprint with peers/clients to be trusted"
         );
+
+        // Loopback admin API shares the live trust snapshot, so operator trust changes take effect
+        // on the next handshake without a restart.
+        if config.admin.enabled {
+            spawn_admin(
+                &config.admin,
+                registry.clone(),
+                node_tls.trust().clone(),
+                node_pki.clone(),
+            )
+            .await?;
+        }
+
         let listener = TcpListener::bind(&config.pki.node_bind).await?;
         let rotate_every = Duration::from_secs(config.pki.rotate_every_hours * 3600);
         serve_pqmtls(
@@ -96,6 +112,52 @@ async fn main() -> anyhow::Result<()> {
     } else {
         let listener = TcpListener::bind(&config.bind).await?;
         serve_plain(app, listener, shutdown_signal()).await
+    }
+}
+
+/// Bind the loopback admin listener and spawn it. Refuses a non-loopback bind: the admin API has
+/// no auth and must never be reachable off-host.
+async fn spawn_admin(
+    admin: &AdminConfig,
+    registry: Arc<dyn PeerTrustRegistry>,
+    trust: TrustStore,
+    pki: Arc<dyn NodePki>,
+) -> anyhow::Result<()> {
+    if !is_loopback_bind(&admin.bind) {
+        anyhow::bail!(
+            "admin.bind ({}) must be loopback (127.0.0.1/::1) — the admin API has no auth",
+            admin.bind
+        );
+    }
+    let listener = TcpListener::bind(&admin.bind).await?;
+    let app = admin_router(AdminState {
+        registry,
+        trust,
+        pki,
+    });
+    tokio::spawn(async move {
+        if let Err(e) = serve_admin(app, listener, shutdown_signal()).await {
+            tracing::error!(error = %e, "admin API stopped");
+        }
+    });
+    Ok(())
+}
+
+/// Whether a `host:port` bind string resolves only to loopback addresses.
+fn is_loopback_bind(bind: &str) -> bool {
+    use std::net::ToSocketAddrs;
+    match bind.to_socket_addrs() {
+        Ok(addrs) => {
+            let mut any = false;
+            for a in addrs {
+                any = true;
+                if !a.ip().is_loopback() {
+                    return false;
+                }
+            }
+            any
+        }
+        Err(_) => false,
     }
 }
 

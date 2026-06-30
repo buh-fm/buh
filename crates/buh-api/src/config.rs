@@ -23,6 +23,21 @@ pub struct AppConfig {
     pub blob: BlobConfig,
     /// PQ-mTLS ingress + per-node CA (disabled by default; `bind` stays plain loopback for dev).
     pub pki: PkiConfig,
+    /// Loopback operator admin API (peer-trust management against a running node).
+    pub admin: AdminConfig,
+}
+
+/// Loopback admin API configuration (`doc/design.md` §5.1).
+///
+/// Because Turso locks the datastore exclusively, `buh-cli` cannot manage trust by opening the DB
+/// while the daemon runs; instead the daemon exposes a small admin API here, on **loopback only**.
+/// It is started only when [`PkiConfig::enabled`] is also set (trust management needs the registry).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AdminConfig {
+    /// Whether to start the loopback admin listener (alongside a PQ-mTLS node).
+    pub enabled: bool,
+    /// Address for the admin listener. **Keep this on loopback** — there is no auth.
+    pub bind: String,
 }
 
 /// PQ-mTLS / per-node-CA configuration (`doc/design.md` §5.1, the decentralised-CA deviation).
@@ -120,6 +135,10 @@ impl Default for AppConfig {
                 sans: vec!["localhost".to_string()],
                 leaf_ttl_hours: 48,
                 rotate_every_hours: 24,
+            },
+            admin: AdminConfig {
+                enabled: true,
+                bind: "127.0.0.1:8081".to_string(),
             },
         }
     }
