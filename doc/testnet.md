@@ -40,6 +40,7 @@ Record each node's reachable address and CA fingerprint here as it joins.
 | Node | Edge address | CA fingerprint | Role |
 |------|--------------|----------------|------|
 | `testnet.buh.fm` | `testnet.buh.fm:31415` | `3c8f125861f3c39f849a469cb32ef599000c71896ea1ccc8a5baaad7419ef808` | relay + blob (fs) |
+| `t2.buh.fm` | `t2.buh.fm:31415` | _populate after its first deploy (`buh-cli ca show` on the node)_ | relay + blob (fs) |
 
 > Re-keying a node (`buh-cli ca rotate --force`) changes its fingerprint — update
 > this table and every peer must re-pin.
