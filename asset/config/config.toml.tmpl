@@ -1,0 +1,44 @@
+# buh-api / buh-cli configuration template.
+#
+# deploy.sh renders this with values from manifest.yml, writing the result to
+# /etc/buh/config.toml on the target. {{PLACEHOLDERS}} are substituted at deploy time. Env vars
+# (BUH_*, nested with __, e.g. BUH_PKI__NODE_BIND) override any value here.
+#
+# There are no secrets in this file: the node holds no DB password (the datastore is an embedded
+# Turso file) and generates its own CA/PKI on first start. The blob role, when using the `fs`
+# backend, needs no credentials either.
+
+bind = "{{BIND}}"                 # plain loopback health/debug; PQ-mTLS ingress is [pki].node_bind
+db_path = "{{DB_PATH}}"
+log_format = "{{LOG_FORMAT}}"
+
+[relay]
+default_ttl_seconds = {{DEFAULT_TTL_SECONDS}}
+max_ttl_seconds = {{MAX_TTL_SECONDS}}
+max_payload_bytes = {{MAX_PAYLOAD_BYTES}}
+max_pull_limit = {{MAX_PULL_LIMIT}}
+max_wait_seconds = {{MAX_WAIT_SECONDS}}
+
+[blob]
+# A node opts into the blob role. `fs` stores opaque client-encrypted ciphertext on local disk
+# (or ZFS); `s3` (requires buh-api built with the `s3` feature) forwards to S3/MinIO.
+enabled = {{BLOB_ENABLED}}
+backend = "{{BLOB_BACKEND}}"
+fs_root = "{{BLOB_FS_ROOT}}"
+max_blob_bytes = {{MAX_BLOB_BYTES}}
+s3_endpoint = "{{S3_ENDPOINT}}"
+s3_region = "{{S3_REGION}}"
+s3_access_key = "{{S3_ACCESS_KEY}}"
+s3_secret_key = "{{S3_SECRET_KEY}}"
+
+[pki]
+# Decentralised PQ-mTLS (doc/design.md §5.1). When enabled, the node generates and self-serves
+# its own CA, binds PQ-mTLS on node_bind (BUH_NODE_PORT), and rotates its leaf in process. There
+# is no step-ca and no central PKI. Share the CA fingerprint (`buh-cli ca show`) with peers; trust
+# theirs with `buh-cli peer trust <ca-fp>`.
+enabled = {{PKI_ENABLED}}
+dir = "{{PKI_DIR}}"
+node_bind = "{{NODE_BIND}}"
+sans = {{PKI_SANS}}               # TOML array, e.g. ["node1.example.com"]
+leaf_ttl_hours = {{LEAF_TTL_HOURS}}
+rotate_every_hours = {{ROTATE_EVERY_HOURS}}

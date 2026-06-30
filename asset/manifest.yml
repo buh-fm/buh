@@ -1,0 +1,55 @@
+app: buh
+
+# buh nodes run on untrusted, third-party machines — there is no central control plane, no
+# shared database, and no central PKI. Each node is its own CA (it self-serves PQ-mTLS and pins
+# peers by CA fingerprint) and keeps all state in an embedded Turso datastore. This manifest is
+# therefore a per-node deployment descriptor, not a fleet topology: `deploy.sh` renders one
+# node's config from the block under the chosen environment/host.
+
+environments:
+  prod:
+    components:
+      node:
+        # A node opts into roles. Every node runs the relay; this one also runs the blob role.
+        hosts: [node1.example.internal]
+        config:
+          # Plain loopback ingress is OFF in prod: the node is reachable only over PQ-mTLS on
+          # node_bind (the standardised BUH_NODE_PORT, forwarded from the OPNsense/firewalld edge).
+          bind: 127.0.0.1:8080          # health/debug on loopback only
+          db_path: /var/lib/buh/relay.db
+          log_format: json
+          relay:
+            default_ttl_seconds: 604800  # 7 days
+            max_ttl_seconds: 2592000     # 30 days
+            max_payload_bytes: 262144    # 256 KiB
+            max_pull_limit: 100
+            max_wait_seconds: 30
+          blob:
+            enabled: true
+            backend: fs                  # filesystem/ZFS; opaque client-encrypted ciphertext only
+            fs_root: /var/lib/buh/blobs
+            max_blob_bytes: 67108864     # 64 MiB
+          pki:
+            enabled: true
+            dir: /var/lib/buh/pki        # CA key + cert; the node generates these on first start
+            node_bind: 0.0.0.0:8443      # BUH_NODE_PORT — the only port exposed at the edge
+            sans: [node1.example.com]    # hostnames/IPs the leaf answers to
+            leaf_ttl_hours: 48
+            rotate_every_hours: 24       # in-process leaf rotation (no step-ca, no .path units)
+  dev:
+    components:
+      node:
+        hosts: [localhost]
+        config:
+          # Dev/web-demo mode: plain HTTP on loopback, PKI off, so the Vite proxy and the browser
+          # demo work without certificates. This is the mode the integration tests exercise.
+          bind: 127.0.0.1:8080
+          db_path: ./buh-relay.db
+          log_format: pretty
+          blob:
+            enabled: true
+            backend: fs
+            fs_root: ./buh-blobs
+            max_blob_bytes: 67108864
+          pki:
+            enabled: false

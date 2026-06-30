@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<service>
+  <short>buh-node</short>
+  <description>buh node PQ-mTLS ingress (BUH_NODE_PORT). This is the single port a node exposes:
+  the relay/blob API served over X25519MLKEM768 mutual TLS, with peers pinned per-CA. The plain
+  loopback health port (127.0.0.1:8080) is never opened. Forward this port from the edge
+  (OPNsense/router) to the node host.</description>
+  <port protocol="tcp" port="8443"/>
+</service>

@@ -1,0 +1,45 @@
+[Unit]
+Description=buh node — blind relay/mailbox (+ optional blob role) over PQ-mTLS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=buh
+Group=buh
+ExecStart=/usr/local/bin/buh-api --config /etc/buh/config.toml
+Restart=on-failure
+RestartSec=2
+
+# The node is its own CA and rotates its own TLS leaf IN PROCESS on a timer (see [pki] in
+# config.toml). This is the decentralised-CA deviation: there is deliberately NO step-ca and NO
+# `.path` unit watching an externally-renewed certificate. Nothing external restarts this service
+# for cert rotation.
+
+# Hardening (generic.md §8) — relax an individual knob only if a feature genuinely requires it.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+ProtectClock=true
+ProtectHostname=true
+RestrictNamespaces=true
+
+# Writable state: embedded Turso datastore, the per-node CA/PKI material, and (if the blob role
+# is enabled) the local blob store. All live under one tree.
+ReadWritePaths=/var/lib/buh
+
+# Network families the service needs (TCP over IPv4/IPv6; AF_UNIX for logging).
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
