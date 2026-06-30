@@ -37,11 +37,10 @@ you at `your-edge-hostname:31415`.
 
 Record each node's reachable address and CA fingerprint here as it joins.
 
-| Node | Edge address (`host:31415`) | CA fingerprint | Role |
-|------|------------------------------|----------------|------|
-| `slartibartfast` (dogfood) | _\<edge-fqdn\>_:31415 — internal mesh `slartibartfast.kosherinata.internal:31415` | `3c8f125861f3c39f849a469cb32ef599000c71896ea1ccc8a5baaad7419ef808` | relay + blob (fs) |
+| Node | Edge address | CA fingerprint | Role |
+|------|--------------|----------------|------|
+| `testnet.buh.fm` | `testnet.buh.fm:31415` | `3c8f125861f3c39f849a469cb32ef599000c71896ea1ccc8a5baaad7419ef808` | relay + blob (fs) |
 
-> Fill in slarti's `<edge-fqdn>` once edge port-forwarding to `31415` is in place.
 > Re-keying a node (`buh-cli ca rotate --force`) changes its fingerprint — update
 > this table and every peer must re-pin.
 
@@ -79,7 +78,7 @@ Peering is symmetric — **both** sides run a `trust`:
 ```sh
 # on YOUR node — pin the peer's CA
 buh-cli peer trust 3c8f125861f3c39f849a469cb32ef599000c71896ea1ccc8a5baaad7419ef808 \
-        --note "slartibartfast (dogfood)"
+        --note "testnet.buh.fm"
 
 # on the PEER node — they pin YOUR CA
 buh-cli peer trust <your-ca-fingerprint> --note "my-node"
