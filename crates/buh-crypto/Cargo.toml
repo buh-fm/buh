@@ -27,6 +27,11 @@ chacha20poly1305 = { workspace = true }
 # selected by a target cfg (.cargo/config.toml); native uses the OS RNG.
 getrandom = { workspace = true }
 sha2 = { workspace = true }
+hkdf = { workspace = true }
+# Hybrid handshake KEM: classical X25519 + post-quantum ML-KEM-768 (FIPS 203).
+# `getrandom` gives ml-kem its system-RNG keygen/encapsulate (getrandom 0.4 → wasm_js on wasm).
+x25519-dalek = { workspace = true }
+ml-kem = { workspace = true, features = ["getrandom"] }
 wasm-bindgen = { workspace = true, optional = true }
 
 [dev-dependencies]
